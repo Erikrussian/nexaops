@@ -4,6 +4,7 @@ packages:
 
 allowBuilds:
   '@swc/core': true
+  bcrypt: set this to true or false
 
 onlyBuiltDependencies:
   - '@swc/core'
