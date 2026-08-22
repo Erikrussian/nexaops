@@ -9,6 +9,7 @@ async function bootstrap() {
       whitelist: true, // Tự động loại bỏ các field thừa không có trong DTO
       forbidNonWhitelisted: true, // Báo lỗi nếu client gửi field không hợp lệ
       transform: true, // Tự động convert kiểu dữ liệu (vd: string -> number)
+      stopAtFirstError: true,
     }),
   );
   const port = process.env.PORT ?? 3000;

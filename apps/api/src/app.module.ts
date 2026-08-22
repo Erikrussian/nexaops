@@ -5,6 +5,8 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './modules/auth/auth.module';
 import { CompaniesModule } from './modules/companies/companies.module';
+import { CompanyMembersModule } from './modules/company-members/company-members.module';
+import { DepartmentsModule } from './modules/departments/departments.module';
 import { UsersModule } from './modules/users/users.module';
 
 @Module({
@@ -26,6 +28,8 @@ import { UsersModule } from './modules/users/users.module';
     UsersModule,
     AuthModule,
     CompaniesModule,
+    DepartmentsModule,
+    CompanyMembersModule,
   ],
   controllers: [AppController],
   providers: [AppService],
