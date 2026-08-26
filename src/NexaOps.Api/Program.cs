@@ -1,9 +1,15 @@
 using Microsoft.OpenApi.Models;
 using NexaOps.Api.Middleware;
+using NexaOps.Application;
+using NexaOps.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Register Controllers & JSON Options
+// 1. Register Application & Infrastructure Services
+builder.Services.AddApplication();
+builder.Services.AddInfrastructure(builder.Configuration);
+
+// 2. Register Controllers & JSON Options
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -11,10 +17,10 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
     });
 
-// 2. Register Health Checks
+// 3. Register Health Checks
 builder.Services.AddHealthChecks();
 
-// 3. Register Swagger with JWT Bearer Authentication Support
+// 4. Register Swagger with JWT Bearer Authentication Support
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -53,21 +59,21 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// 4. Global Exception Handling Middleware (Equivalent to NestJS HttpExceptionFilter)
+// 5. Global Exception Handling Middleware (Equivalent to NestJS HttpExceptionFilter)
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
-// 5. Swagger UI
+// 6. Swagger UI
 if (app.Environment.IsDevelopment() || true)
 {
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
         c.SwaggerEndpoint("/swagger/v1/swagger.json", "NexaOps API v0.1");
-        c.RoutePrefix = string.Empty; // Swagger UI at root URL http://localhost:5000
+        c.RoutePrefix = string.Empty; // Swagger UI at root URL
     });
 }
 
-// 6. Routing & Endpoints
+// 7. Routing & Endpoints
 app.UseRouting();
 
 // app.UseAuthentication();
