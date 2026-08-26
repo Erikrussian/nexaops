@@ -37,8 +37,16 @@ coverage/
 *.suo
 *.ntvs*
 *.njsproj
-*.sln
 *.sw?
+
+# .NET & Visual Studio build outputs
+bin/
+obj/
+.vs/
+*.user
+*.userprefs
+TestResults/
+*.sln.docstates
 
 # OS generated files
 .DS_Store
