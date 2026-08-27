@@ -76,8 +76,8 @@ if (app.Environment.IsDevelopment() || true)
 // 7. Routing & Endpoints
 app.UseRouting();
 
-// app.UseAuthentication();
-// app.UseAuthorization();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 app.MapHealthChecks("/health");
