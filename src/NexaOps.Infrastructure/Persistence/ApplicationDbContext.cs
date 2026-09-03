@@ -15,6 +15,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<Department> Departments => Set<Department>();
+    public DbSet<CompanyMember> CompanyMembers => Set<CompanyMember>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
