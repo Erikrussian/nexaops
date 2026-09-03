@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using NexaOps.Application.Auth.Services;
 using NexaOps.Application.Companies.Services;
+using NexaOps.Application.CompanyMembers.Services;
 using NexaOps.Application.Departments.Services;
 using NexaOps.Application.Users.Services;
 
@@ -14,6 +15,7 @@ public static class DependencyInjection
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<ICompanyService, CompanyService>();
         services.AddScoped<IDepartmentService, DepartmentService>();
+        services.AddScoped<ICompanyMemberService, CompanyMemberService>();
         return services;
     }
 }
