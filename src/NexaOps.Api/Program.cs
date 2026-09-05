@@ -1,7 +1,9 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using NexaOps.Api.Middleware;
 using NexaOps.Application;
 using NexaOps.Infrastructure;
+using NexaOps.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -58,6 +60,25 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+
+// Auto-migrate database on startup when PostgreSQL is running
+if (!app.Environment.IsEnvironment("Testing"))
+{
+    using var scope = app.Services.CreateScope();
+    var dbContext = scope.ServiceProvider.GetService<ApplicationDbContext>();
+    if (dbContext is not null && dbContext.Database.IsRelational())
+    {
+        try
+        {
+            await dbContext.Database.MigrateAsync();
+        }
+        catch (Exception ex)
+        {
+            var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+            logger.LogWarning(ex, "Could not apply database migrations on startup. Please ensure PostgreSQL is running.");
+        }
+    }
+}
 
 // 5. Global Exception Handling Middleware (Equivalent to NestJS HttpExceptionFilter)
 app.UseMiddleware<GlobalExceptionMiddleware>();

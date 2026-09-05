@@ -1,4 +1,18 @@
 services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nexaops-api
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=nexaops_db;Username=postgres;Password=local_password
+      - ASPNETCORE_ENVIRONMENT=Development
+    depends_on:
+      - postgres
+
   postgres:
     image: postgres:16-alpine
     container_name: nexaops-postgres
