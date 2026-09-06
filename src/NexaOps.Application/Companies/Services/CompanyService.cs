@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using NexaOps.Application.Common.Interfaces;
 using NexaOps.Application.Companies.DTOs;
 using NexaOps.Domain.Entities;
+using NexaOps.Domain.Enums;
 
 namespace NexaOps.Application.Companies.Services;
 
@@ -12,11 +13,16 @@ public class CompanyService : ICompanyService
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICompanyAccessService _companyAccessService;
 
-    public CompanyService(IApplicationDbContext context, ICurrentUserService currentUserService)
+    public CompanyService(
+        IApplicationDbContext context,
+        ICurrentUserService currentUserService,
+        ICompanyAccessService companyAccessService)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _companyAccessService = companyAccessService;
     }
 
     public async Task<CompanyResponse> CreateAsync(CreateCompanyRequest request, CancellationToken cancellationToken = default)
@@ -65,9 +71,27 @@ public class CompanyService : ICompanyService
             throw new UnauthorizedAccessException("Vui lòng đăng nhập để thực hiện thao tác này");
         }
 
+        var userId = _currentUserService.UserId.Value;
+
+        // 1. Companies owned by user
+        var ownedCompanyIds = await _context.Companies
+            .AsNoTracking()
+            .Where(c => c.OwnerId == userId && c.IsActive)
+            .Select(c => c.Id)
+            .ToListAsync(cancellationToken);
+
+        // 2. Companies where user is an active member
+        var memberCompanyIds = await _context.CompanyMembers
+            .AsNoTracking()
+            .Where(m => m.UserId == userId && m.Status == MemberStatus.Active)
+            .Select(m => m.CompanyId)
+            .ToListAsync(cancellationToken);
+
+        var allCompanyIds = ownedCompanyIds.Union(memberCompanyIds).ToList();
+
         var companies = await _context.Companies
             .AsNoTracking()
-            .Where(c => c.OwnerId == _currentUserService.UserId.Value && c.IsActive)
+            .Where(c => allCompanyIds.Contains(c.Id) && c.IsActive)
             .OrderByDescending(c => c.CreatedAt)
             .Select(c => CompanyResponse.FromEntity(c))
             .ToListAsync(cancellationToken);
@@ -86,6 +110,8 @@ public class CompanyService : ICompanyService
             throw new KeyNotFoundException($"Không tìm thấy công ty với ID: {id}");
         }
 
+        await _companyAccessService.EnsureReadAccessAsync(id, cancellationToken);
+
         return CompanyResponse.FromEntity(company);
     }
 
@@ -102,15 +128,14 @@ public class CompanyService : ICompanyService
             throw new KeyNotFoundException($"Không tìm thấy công ty với slug: {slug}");
         }
 
+        await _companyAccessService.EnsureReadAccessAsync(company.Id, cancellationToken);
+
         return CompanyResponse.FromEntity(company);
     }
 
     public async Task<CompanyResponse> UpdateAsync(Guid id, UpdateCompanyRequest request, CancellationToken cancellationToken = default)
     {
-        if (!_currentUserService.IsAuthenticated || !_currentUserService.UserId.HasValue)
-        {
-            throw new UnauthorizedAccessException("Vui lòng đăng nhập để thực hiện thao tác này");
-        }
+        await _companyAccessService.EnsureIsOwnerAsync(id, cancellationToken);
 
         var company = await _context.Companies
             .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
@@ -118,11 +143,6 @@ public class CompanyService : ICompanyService
         if (company is null)
         {
             throw new KeyNotFoundException($"Không tìm thấy công ty với ID: {id}");
-        }
-
-        if (company.OwnerId != _currentUserService.UserId.Value)
-        {
-            throw new UnauthorizedAccessException("Bạn không có quyền chỉnh sửa thông tin công ty này");
         }
 
         if (!string.IsNullOrWhiteSpace(request.Slug))
@@ -176,10 +196,7 @@ public class CompanyService : ICompanyService
 
     public async Task RemoveAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        if (!_currentUserService.IsAuthenticated || !_currentUserService.UserId.HasValue)
-        {
-            throw new UnauthorizedAccessException("Vui lòng đăng nhập để thực hiện thao tác này");
-        }
+        await _companyAccessService.EnsureIsOwnerAsync(id, cancellationToken);
 
         var company = await _context.Companies
             .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
@@ -187,11 +204,6 @@ public class CompanyService : ICompanyService
         if (company is null)
         {
             throw new KeyNotFoundException($"Không tìm thấy công ty với ID: {id}");
-        }
-
-        if (company.OwnerId != _currentUserService.UserId.Value)
-        {
-            throw new UnauthorizedAccessException("Bạn không có quyền xóa công ty này");
         }
 
         _context.Companies.Remove(company);

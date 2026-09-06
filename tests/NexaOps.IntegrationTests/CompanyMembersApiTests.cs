@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Microsoft.Extensions.DependencyInjection;
 using NexaOps.Application.Auth.DTOs;
 using NexaOps.Application.Companies.DTOs;
 using NexaOps.Application.CompanyMembers.DTOs;
@@ -12,9 +13,11 @@ namespace NexaOps.IntegrationTests;
 public class CompanyMembersApiTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;
+    private readonly CustomWebApplicationFactory _factory;
 
     public CompanyMembersApiTests(CustomWebApplicationFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -170,24 +173,28 @@ public class CompanyMembersApiTests : IClassFixture<CustomWebApplicationFactory>
         // Arrange
         var (ownerToken, _, companyId) = await SetupCompanyAsync();
 
-        // Create member with Owner role
-        var inviteEmail = $"owner2.{Guid.NewGuid():N}@nexaops.com";
-        var inviteReq = new InviteMemberRequest { Email = inviteEmail, Role = MemberRole.Owner };
-        var msgInvite = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/members/invite")
+        using (var scope = _factory.Services.CreateScope())
         {
-            Content = JsonContent.Create(inviteReq)
-        };
-        msgInvite.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
-        var inviteRes = await _client.SendAsync(msgInvite);
-        var inviteData = await inviteRes.Content.ReadFromJsonAsync<InviteMemberResponse>();
+            var db = scope.ServiceProvider.GetRequiredService<NexaOps.Infrastructure.Persistence.ApplicationDbContext>();
+            var ownerMember = new NexaOps.Domain.Entities.CompanyMember
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = companyId,
+                Email = $"owner_{Guid.NewGuid():N}@nexaops.com",
+                Role = MemberRole.Owner,
+                Status = MemberStatus.Active
+            };
+            db.CompanyMembers.Add(ownerMember);
+            await db.SaveChangesAsync();
 
-        // Act - Try to remove OWNER
-        var msgDel = new HttpRequestMessage(HttpMethod.Delete, $"/company-members/{inviteData!.Member.Id}");
-        msgDel.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
-        var delRes = await _client.SendAsync(msgDel);
+            // Act - Try to remove OWNER
+            var msgDel = new HttpRequestMessage(HttpMethod.Delete, $"/company-members/{ownerMember.Id}");
+            msgDel.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+            var delRes = await _client.SendAsync(msgDel);
 
-        // Assert
-        Assert.Equal(HttpStatusCode.BadRequest, delRes.StatusCode);
+            // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, delRes.StatusCode);
+        }
     }
 
     [Fact]

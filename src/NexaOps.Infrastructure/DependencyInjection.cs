@@ -18,7 +18,7 @@ public static class DependencyInjection
     {
         // 1. Database Configuration
         var connectionString = configuration.GetConnectionString("DefaultConnection")
-            ?? "Host=localhost;Port=5432;Database=nexaops_db;Username=postgres;Password=local_password";
+            ?? throw new InvalidOperationException("Configuration 'ConnectionStrings:DefaultConnection' is missing or not configured.");
 
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseNpgsql(connectionString));

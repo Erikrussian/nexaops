@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using NexaOps.Application.Auth.Services;
+using NexaOps.Application.Common.Interfaces;
+using NexaOps.Application.Common.Services;
 using NexaOps.Application.Companies.Services;
 using NexaOps.Application.CompanyMembers.Services;
 using NexaOps.Application.Departments.Services;
@@ -11,6 +13,7 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
+        services.AddScoped<ICompanyAccessService, CompanyAccessService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<ICompanyService, CompanyService>();

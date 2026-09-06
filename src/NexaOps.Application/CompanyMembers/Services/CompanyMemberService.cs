@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
+using NexaOps.Application.Common.Exceptions;
 using NexaOps.Application.Common.Interfaces;
 using NexaOps.Application.Companies.DTOs;
 using NexaOps.Application.CompanyMembers.DTOs;
@@ -12,18 +13,25 @@ public class CompanyMemberService : ICompanyMemberService
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICompanyAccessService _companyAccessService;
 
-    public CompanyMemberService(IApplicationDbContext context, ICurrentUserService currentUserService)
+    public CompanyMemberService(
+        IApplicationDbContext context,
+        ICurrentUserService currentUserService,
+        ICompanyAccessService companyAccessService)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _companyAccessService = companyAccessService;
     }
 
     public async Task<InviteMemberResponse> InviteMemberAsync(Guid companyId, InviteMemberRequest request, CancellationToken cancellationToken = default)
     {
-        if (!_currentUserService.IsAuthenticated || !_currentUserService.UserId.HasValue)
+        await _companyAccessService.EnsureCanManageMembersAsync(companyId, cancellationToken);
+
+        if (request.Role == MemberRole.Owner)
         {
-            throw new UnauthorizedAccessException("Vui lòng đăng nhập để thực hiện thao tác này");
+            throw new InvalidOperationException("Không thể gán vai trò OWNER thông qua lời mời. Chuyển quyền sở hữu phải thực hiện qua quy trình riêng.");
         }
 
         var company = await _context.Companies
@@ -70,7 +78,7 @@ public class CompanyMemberService : ICompanyMemberService
             existingMember.DepartmentId = request.DepartmentId;
             existingMember.InviteToken = inviteToken;
             existingMember.InviteExpiresAt = inviteExpiresAt;
-            existingMember.InvitedById = _currentUserService.UserId.Value;
+            existingMember.InvitedById = _currentUserService.UserId!.Value;
             existingMember.Status = MemberStatus.Invited;
             existingMember.UpdatedAt = DateTime.UtcNow;
             member = existingMember;
@@ -88,7 +96,7 @@ public class CompanyMemberService : ICompanyMemberService
                 Status = MemberStatus.Invited,
                 InviteToken = inviteToken,
                 InviteExpiresAt = inviteExpiresAt,
-                InvitedById = _currentUserService.UserId.Value,
+                InvitedById = _currentUserService.UserId!.Value,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -150,6 +158,8 @@ public class CompanyMemberService : ICompanyMemberService
 
     public async Task<IReadOnlyList<CompanyMemberResponse>> GetMembersByCompanyAsync(Guid companyId, CancellationToken cancellationToken = default)
     {
+        await _companyAccessService.EnsureCanManageMembersAsync(companyId, cancellationToken);
+
         var members = await _context.CompanyMembers
             .Include(m => m.User)
             .Include(m => m.Department)
@@ -174,6 +184,27 @@ public class CompanyMemberService : ICompanyMemberService
         if (member is null)
         {
             throw new KeyNotFoundException("Không tìm thấy thành viên này");
+        }
+
+        await _companyAccessService.EnsureCanManageMembersAsync(member.CompanyId, cancellationToken);
+
+        var isOwner = await _companyAccessService.IsOwnerAsync(member.CompanyId, cancellationToken);
+
+        // Admin cannot edit Owner
+        if (member.Role == MemberRole.Owner && !isOwner)
+        {
+            throw new ForbiddenAccessException("Admin không được phép chỉnh sửa Owner của công ty");
+        }
+
+        if (request.Role == MemberRole.Owner)
+        {
+            throw new InvalidOperationException("Không thể gán vai trò OWNER thông qua cập nhật thành viên.");
+        }
+
+        // A user cannot elevate their own role
+        if (member.UserId.HasValue && member.UserId.Value == _currentUserService.UserId && request.Role.HasValue && request.Role.Value != member.Role)
+        {
+            throw new ForbiddenAccessException("Người dùng không được tự thay đổi vai trò của chính mình");
         }
 
         if (request.DepartmentId.HasValue)
@@ -216,9 +247,17 @@ public class CompanyMemberService : ICompanyMemberService
             throw new KeyNotFoundException("Không tìm thấy thành viên này");
         }
 
+        await _companyAccessService.EnsureCanManageMembersAsync(member.CompanyId, cancellationToken);
+
         if (member.Role == MemberRole.Owner)
         {
             throw new InvalidOperationException("Không thể xóa người sở hữu (OWNER) của công ty");
+        }
+
+        var isOwner = await _companyAccessService.IsOwnerAsync(member.CompanyId, cancellationToken);
+        if (!isOwner && member.Role == MemberRole.Owner)
+        {
+            throw new ForbiddenAccessException("Admin không được phép xóa Owner của công ty");
         }
 
         _context.CompanyMembers.Remove(member);

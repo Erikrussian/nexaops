@@ -36,6 +36,7 @@ public class GlobalExceptionMiddleware
         {
             KeyNotFoundException => (int)HttpStatusCode.NotFound,
             UnauthorizedAccessException => (int)HttpStatusCode.Unauthorized,
+            NexaOps.Application.Common.Exceptions.ForbiddenAccessException => (int)HttpStatusCode.Forbidden,
             InvalidOperationException => (int)HttpStatusCode.BadRequest,
             ArgumentException => (int)HttpStatusCode.BadRequest,
             _ => (int)HttpStatusCode.InternalServerError

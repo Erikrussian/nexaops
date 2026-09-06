@@ -226,7 +226,7 @@ public class CompaniesApiTests : IClassFixture<CustomWebApplicationFactory>
         var response = await _client.SendAsync(msgUpdate);
 
         // Assert
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]

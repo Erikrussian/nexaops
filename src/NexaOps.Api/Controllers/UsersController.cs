@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexaOps.Application.Common.Models;
 using NexaOps.Application.Users.DTOs;
@@ -7,6 +8,7 @@ namespace NexaOps.Api.Controllers;
 
 [ApiController]
 [Route("users")]
+[Authorize]
 public class UsersController : ControllerBase
 {
     private readonly IUserService _userService;
