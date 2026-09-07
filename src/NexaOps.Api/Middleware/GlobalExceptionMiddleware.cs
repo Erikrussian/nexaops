@@ -37,6 +37,7 @@ public class GlobalExceptionMiddleware
             KeyNotFoundException => (int)HttpStatusCode.NotFound,
             UnauthorizedAccessException => (int)HttpStatusCode.Unauthorized,
             NexaOps.Application.Common.Exceptions.ForbiddenAccessException => (int)HttpStatusCode.Forbidden,
+            NexaOps.Application.Common.Exceptions.ValidationException => (int)HttpStatusCode.BadRequest,
             InvalidOperationException => (int)HttpStatusCode.BadRequest,
             ArgumentException => (int)HttpStatusCode.BadRequest,
             _ => (int)HttpStatusCode.InternalServerError
@@ -51,6 +52,11 @@ public class GlobalExceptionMiddleware
             Detail = exception.Message,
             Instance = context.Request.Path
         };
+
+        if (exception is NexaOps.Application.Common.Exceptions.ValidationException valEx)
+        {
+            problemDetails.Extensions["errors"] = valEx.Errors;
+        }
 
         problemDetails.Extensions["traceId"] = context.TraceIdentifier;
 

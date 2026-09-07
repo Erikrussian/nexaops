@@ -116,6 +116,32 @@ public class CompanyAccessService : ICompanyAccessService
         throw new ForbiddenAccessException("Chỉ Owner hoặc Admin mới có quyền quản lý thành viên");
     }
 
+    public async Task EnsureCanManageFormsAsync(Guid companyId, CancellationToken cancellationToken = default)
+    {
+        var (isOwner, memberRole) = await ResolveAccessAsync(companyId, cancellationToken);
+        if (isOwner) return;
+
+        if (memberRole is MemberRole.Admin or MemberRole.Manager)
+        {
+            return;
+        }
+
+        throw new ForbiddenAccessException("Chỉ Owner, Admin hoặc Manager mới có quyền tạo hoặc chỉnh sửa biểu mẫu");
+    }
+
+    public async Task EnsureCanReviewSubmissionsAsync(Guid companyId, CancellationToken cancellationToken = default)
+    {
+        var (isOwner, memberRole) = await ResolveAccessAsync(companyId, cancellationToken);
+        if (isOwner) return;
+
+        if (memberRole is MemberRole.Admin or MemberRole.Manager)
+        {
+            return;
+        }
+
+        throw new ForbiddenAccessException("Chỉ Owner, Admin hoặc Manager mới có quyền duyệt đơn");
+    }
+
     public async Task EnsureIsOwnerAsync(Guid companyId, CancellationToken cancellationToken = default)
     {
         var (isOwner, _) = await ResolveAccessAsync(companyId, cancellationToken);

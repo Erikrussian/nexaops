@@ -5,6 +5,7 @@ using NexaOps.Application.Common.Services;
 using NexaOps.Application.Companies.Services;
 using NexaOps.Application.CompanyMembers.Services;
 using NexaOps.Application.Departments.Services;
+using NexaOps.Application.Forms.Services;
 using NexaOps.Application.Users.Services;
 
 namespace NexaOps.Application;
@@ -19,6 +20,9 @@ public static class DependencyInjection
         services.AddScoped<ICompanyService, CompanyService>();
         services.AddScoped<IDepartmentService, DepartmentService>();
         services.AddScoped<ICompanyMemberService, CompanyMemberService>();
+        services.AddScoped<IFormValidatorService, FormValidatorService>();
+        services.AddScoped<IFormService, FormService>();
+        services.AddScoped<IFormSubmissionService, FormSubmissionService>();
         return services;
     }
 }

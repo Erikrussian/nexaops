@@ -9,5 +9,7 @@ public interface IApplicationDbContext
     DbSet<Company> Companies { get; }
     DbSet<Department> Departments { get; }
     DbSet<CompanyMember> CompanyMembers { get; }
+    DbSet<FormDefinition> FormDefinitions { get; }
+    DbSet<FormSubmission> FormSubmissions { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
