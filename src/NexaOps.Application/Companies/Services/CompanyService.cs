@@ -14,15 +14,18 @@ public class CompanyService : ICompanyService
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
     private readonly ICompanyAccessService _companyAccessService;
+    private readonly IPasswordHasher _passwordHasher;
 
     public CompanyService(
         IApplicationDbContext context,
         ICurrentUserService currentUserService,
-        ICompanyAccessService companyAccessService)
+        ICompanyAccessService companyAccessService,
+        IPasswordHasher passwordHasher)
     {
         _context = context;
         _currentUserService = currentUserService;
         _companyAccessService = companyAccessService;
+        _passwordHasher = passwordHasher;
     }
 
     public async Task<CompanyResponse> CreateAsync(CreateCompanyRequest request, CancellationToken cancellationToken = default)
@@ -188,6 +191,87 @@ public class CompanyService : ICompanyService
         }
 
         company.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return CompanyResponse.FromEntity(company);
+    }
+
+    public async Task<CompanyResponse> TransferOwnershipAsync(Guid companyId, TransferOwnershipRequest request, CancellationToken cancellationToken = default)
+    {
+        await _companyAccessService.EnsureIsOwnerAsync(companyId, cancellationToken);
+        var currentUserId = _currentUserService.UserId!.Value;
+
+        if (request.NewOwnerId == currentUserId)
+        {
+            throw new InvalidOperationException("Không thể chuyển nhượng quyền sở hữu cho chính mình");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Password))
+        {
+            throw new ArgumentException("Mật khẩu xác nhận không được để trống", nameof(request.Password));
+        }
+
+        var currentOwner = await _context.Users
+            .FirstOrDefaultAsync(u => u.Id == currentUserId, cancellationToken);
+
+        if (currentOwner is null || !_passwordHasher.VerifyPassword(request.Password, currentOwner.PasswordHash))
+        {
+            throw new ArgumentException("Mật khẩu xác nhận không chính xác", nameof(request.Password));
+        }
+
+        var company = await _context.Companies
+            .FirstOrDefaultAsync(c => c.Id == companyId, cancellationToken);
+
+        if (company is null)
+        {
+            throw new KeyNotFoundException($"Không tìm thấy công ty với ID: {companyId}");
+        }
+
+        var targetMember = await _context.CompanyMembers
+            .FirstOrDefaultAsync(m => m.CompanyId == companyId && m.UserId == request.NewOwnerId, cancellationToken);
+
+        if (targetMember is null || targetMember.Status != MemberStatus.Active)
+        {
+            throw new InvalidOperationException("Người được chuyển nhượng phải là thành viên đang hoạt động (Active) trong công ty");
+        }
+
+        // 1. Update company owner
+        company.OwnerId = request.NewOwnerId;
+        company.UpdatedAt = DateTime.UtcNow;
+
+        // 2. Update new owner's member role
+        targetMember.Role = MemberRole.Owner;
+        targetMember.UpdatedAt = DateTime.UtcNow;
+
+        // 3. Update previous owner's member record to Admin (or selected role)
+        var previousOwnerRole = request.PreviousOwnerNewRole == MemberRole.Owner
+            ? MemberRole.Admin
+            : request.PreviousOwnerNewRole;
+
+        var previousOwnerMember = await _context.CompanyMembers
+            .FirstOrDefaultAsync(m => m.CompanyId == companyId && m.UserId == currentUserId, cancellationToken);
+
+        if (previousOwnerMember is null)
+        {
+            previousOwnerMember = new CompanyMember
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = companyId,
+                UserId = currentUserId,
+                Role = previousOwnerRole,
+                Status = MemberStatus.Active,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            _context.CompanyMembers.Add(previousOwnerMember);
+        }
+        else
+        {
+            previousOwnerMember.Role = previousOwnerRole;
+            previousOwnerMember.Status = MemberStatus.Active;
+            previousOwnerMember.UpdatedAt = DateTime.UtcNow;
+        }
 
         await _context.SaveChangesAsync(cancellationToken);
 

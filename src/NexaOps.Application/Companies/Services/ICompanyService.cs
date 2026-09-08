@@ -9,5 +9,6 @@ public interface ICompanyService
     Task<CompanyResponse> FindByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<CompanyResponse> FindBySlugAsync(string slug, CancellationToken cancellationToken = default);
     Task<CompanyResponse> UpdateAsync(Guid id, UpdateCompanyRequest request, CancellationToken cancellationToken = default);
+    Task<CompanyResponse> TransferOwnershipAsync(Guid companyId, TransferOwnershipRequest request, CancellationToken cancellationToken = default);
     Task RemoveAsync(Guid id, CancellationToken cancellationToken = default);
 }

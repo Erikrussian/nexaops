@@ -90,6 +90,24 @@ public class CompaniesController : ControllerBase
     }
 
     /// <summary>
+    /// POST /companies/{id}/transfer-ownership - Chuyển nhượng quyền sở hữu công ty (Chỉ Owner hiện tại)
+    /// </summary>
+    [HttpPost("{id:guid}/transfer-ownership")]
+    [ProducesResponseType(typeof(CompanyResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<CompanyResponse>> TransferOwnership(
+        [FromRoute] Guid id,
+        [FromBody] TransferOwnershipRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _companyService.TransferOwnershipAsync(id, request, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// DELETE /companies/{id} - Xóa công ty (Chỉ Owner)
     /// </summary>
     [HttpDelete("{id:guid}")]
