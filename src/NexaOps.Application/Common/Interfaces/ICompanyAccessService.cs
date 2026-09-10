@@ -11,6 +11,7 @@ public interface ICompanyAccessService
     Task EnsureCanManageMembersAsync(Guid companyId, CancellationToken cancellationToken = default);
     Task EnsureCanManageFormsAsync(Guid companyId, CancellationToken cancellationToken = default);
     Task EnsureCanReviewSubmissionsAsync(Guid companyId, CancellationToken cancellationToken = default);
+    Task EnsureCanViewAuditLogsAsync(Guid companyId, CancellationToken cancellationToken = default);
     Task EnsureIsOwnerAsync(Guid companyId, CancellationToken cancellationToken = default);
     Task<bool> IsOwnerAsync(Guid companyId, CancellationToken cancellationToken = default);
     Task<MemberRole?> GetUserRoleInCompanyAsync(Guid companyId, CancellationToken cancellationToken = default);

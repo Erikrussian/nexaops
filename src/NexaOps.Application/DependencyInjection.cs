@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using NexaOps.Application.AuditLogs.Services;
 using NexaOps.Application.Auth.Services;
 using NexaOps.Application.Common.Interfaces;
 using NexaOps.Application.Common.Services;
@@ -23,6 +24,7 @@ public static class DependencyInjection
         services.AddScoped<IFormValidatorService, FormValidatorService>();
         services.AddScoped<IFormService, FormService>();
         services.AddScoped<IFormSubmissionService, FormSubmissionService>();
+        services.AddScoped<IAuditLogService, AuditLogService>();
         return services;
     }
 }

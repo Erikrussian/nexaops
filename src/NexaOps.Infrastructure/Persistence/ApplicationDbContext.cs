@@ -18,6 +18,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<CompanyMember> CompanyMembers => Set<CompanyMember>();
     public DbSet<FormDefinition> FormDefinitions => Set<FormDefinition>();
     public DbSet<FormSubmission> FormSubmissions => Set<FormSubmission>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

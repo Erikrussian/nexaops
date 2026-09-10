@@ -11,5 +11,6 @@ public interface IApplicationDbContext
     DbSet<CompanyMember> CompanyMembers { get; }
     DbSet<FormDefinition> FormDefinitions { get; }
     DbSet<FormSubmission> FormSubmissions { get; }
+    DbSet<AuditLog> AuditLogs { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

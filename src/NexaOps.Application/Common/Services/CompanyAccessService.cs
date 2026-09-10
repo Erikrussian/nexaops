@@ -142,6 +142,19 @@ public class CompanyAccessService : ICompanyAccessService
         throw new ForbiddenAccessException("Chỉ Owner, Admin hoặc Manager mới có quyền duyệt đơn");
     }
 
+    public async Task EnsureCanViewAuditLogsAsync(Guid companyId, CancellationToken cancellationToken = default)
+    {
+        var (isOwner, memberRole) = await ResolveAccessAsync(companyId, cancellationToken);
+        if (isOwner) return;
+
+        if (memberRole is MemberRole.Admin)
+        {
+            return;
+        }
+
+        throw new ForbiddenAccessException("Chỉ Owner hoặc Admin mới có quyền xem nhật ký kiểm toán (Audit Logs)");
+    }
+
     public async Task EnsureIsOwnerAsync(Guid companyId, CancellationToken cancellationToken = default)
     {
         var (isOwner, _) = await ResolveAccessAsync(companyId, cancellationToken);

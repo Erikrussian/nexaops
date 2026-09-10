@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using NexaOps.Application.AuditLogs.Services;
 using NexaOps.Application.Common.Interfaces;
 using NexaOps.Application.Companies.DTOs;
 using NexaOps.Domain.Entities;
@@ -15,17 +16,20 @@ public class CompanyService : ICompanyService
     private readonly ICurrentUserService _currentUserService;
     private readonly ICompanyAccessService _companyAccessService;
     private readonly IPasswordHasher _passwordHasher;
+    private readonly IAuditLogService _auditLogService;
 
     public CompanyService(
         IApplicationDbContext context,
         ICurrentUserService currentUserService,
         ICompanyAccessService companyAccessService,
-        IPasswordHasher passwordHasher)
+        IPasswordHasher passwordHasher,
+        IAuditLogService auditLogService)
     {
         _context = context;
         _currentUserService = currentUserService;
         _companyAccessService = companyAccessService;
         _passwordHasher = passwordHasher;
+        _auditLogService = auditLogService;
     }
 
     public async Task<CompanyResponse> CreateAsync(CreateCompanyRequest request, CancellationToken cancellationToken = default)
@@ -63,6 +67,15 @@ public class CompanyService : ICompanyService
 
         _context.Companies.Add(company);
         await _context.SaveChangesAsync(cancellationToken);
+
+        await _auditLogService.LogAsync(
+            company.Id,
+            _currentUserService.UserId.Value,
+            "CREATE",
+            "Company",
+            company.Id.ToString(),
+            new { company.Name, company.Slug },
+            cancellationToken: cancellationToken);
 
         return CompanyResponse.FromEntity(company);
     }
@@ -194,6 +207,15 @@ public class CompanyService : ICompanyService
 
         await _context.SaveChangesAsync(cancellationToken);
 
+        await _auditLogService.LogAsync(
+            id,
+            _currentUserService.UserId!.Value,
+            "UPDATE",
+            "Company",
+            id.ToString(),
+            request,
+            cancellationToken: cancellationToken);
+
         return CompanyResponse.FromEntity(company);
     }
 
@@ -275,12 +297,22 @@ public class CompanyService : ICompanyService
 
         await _context.SaveChangesAsync(cancellationToken);
 
+        await _auditLogService.LogAsync(
+            companyId,
+            currentUserId,
+            "TRANSFER_OWNERSHIP",
+            "Company",
+            companyId.ToString(),
+            new { request.NewOwnerId, PreviousOwnerRole = previousOwnerRole.ToString() },
+            cancellationToken: cancellationToken);
+
         return CompanyResponse.FromEntity(company);
     }
 
     public async Task RemoveAsync(Guid id, CancellationToken cancellationToken = default)
     {
         await _companyAccessService.EnsureIsOwnerAsync(id, cancellationToken);
+        var currentUserId = _currentUserService.UserId!.Value;
 
         var company = await _context.Companies
             .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
@@ -292,6 +324,14 @@ public class CompanyService : ICompanyService
 
         _context.Companies.Remove(company);
         await _context.SaveChangesAsync(cancellationToken);
+
+        await _auditLogService.LogAsync(
+            id,
+            currentUserId,
+            "DELETE",
+            "Company",
+            id.ToString(),
+            cancellationToken: cancellationToken);
     }
 
     private static string GenerateSlug(string name)
