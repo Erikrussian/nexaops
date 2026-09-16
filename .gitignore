@@ -56,3 +56,7 @@ TestResults/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+
+# Local agent directory
+.agents/

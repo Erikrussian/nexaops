@@ -25,6 +25,7 @@ public static class DependencyInjection
         services.AddScoped<IFormService, FormService>();
         services.AddScoped<IFormSubmissionService, FormSubmissionService>();
         services.AddScoped<IAuditLogService, AuditLogService>();
+        services.AddScoped<IFormAnalyticsService, FormAnalyticsService>();
         return services;
     }
 }

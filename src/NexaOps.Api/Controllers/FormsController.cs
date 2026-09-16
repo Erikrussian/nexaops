@@ -12,11 +12,16 @@ public class FormsController : ControllerBase
 {
     private readonly IFormService _formService;
     private readonly IFormSubmissionService _submissionService;
+    private readonly IFormAnalyticsService _analyticsService;
 
-    public FormsController(IFormService formService, IFormSubmissionService submissionService)
+    public FormsController(
+        IFormService formService,
+        IFormSubmissionService submissionService,
+        IFormAnalyticsService analyticsService)
     {
         _formService = formService;
         _submissionService = submissionService;
+        _analyticsService = analyticsService;
     }
 
     /// <summary>
@@ -220,6 +225,43 @@ public class FormsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _submissionService.ReviewAsync(companyId, submissionId, dto, cancellationToken);
+        return Ok(result);
+    }
+
+    // ==========================================
+    // FORM ANALYTICS ENDPOINTS
+    // ==========================================
+
+    /// <summary>
+    /// GET /companies/{companyId}/forms/analytics/overview - Thống kê tổng quan biểu mẫu toàn công ty (Owner, Admin, Manager)
+    /// </summary>
+    [HttpGet("companies/{companyId:guid}/forms/analytics/overview")]
+    [ProducesResponseType(typeof(CompanyFormAnalyticsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<CompanyFormAnalyticsDto>> GetCompanyOverview(
+        [FromRoute] Guid companyId,
+        [FromQuery] int days = 30,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _analyticsService.GetCompanyOverviewAsync(companyId, days, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// GET /companies/{companyId}/forms/{formId}/analytics - Thống kê chi tiết riêng cho một biểu mẫu (Owner, Admin, Manager)
+    /// </summary>
+    [HttpGet("companies/{companyId:guid}/forms/{formId:guid}/analytics")]
+    [ProducesResponseType(typeof(FormDetailAnalyticsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<FormDetailAnalyticsDto>> GetFormAnalytics(
+        [FromRoute] Guid companyId,
+        [FromRoute] Guid formId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _analyticsService.GetFormAnalyticsAsync(companyId, formId, cancellationToken);
         return Ok(result);
     }
 }
