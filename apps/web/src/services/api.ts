@@ -92,7 +92,50 @@ class ApiClient {
     return this.request<FormDefinition>(`/companies/${companyId}/forms/${formId}`)
   }
 
+  async createForm(
+    companyId: string,
+    dto: {
+      title: string
+      code: string
+      description?: string
+      departmentId?: string
+      fields: import('../types').FormField[]
+    }
+  ): Promise<FormDefinition> {
+    return this.request<FormDefinition>(`/companies/${companyId}/forms`, {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    })
+  }
+
+  async changeFormStatus(
+    companyId: string,
+    formId: string,
+    status: import('../types').FormStatus
+  ): Promise<FormDefinition> {
+    return this.request<FormDefinition>(`/companies/${companyId}/forms/${formId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    })
+  }
+
+  async deleteForm(companyId: string, formId: string): Promise<void> {
+    return this.request<void>(`/companies/${companyId}/forms/${formId}`, {
+      method: 'DELETE',
+    })
+  }
+
   // Submissions APIs
+  async submitForm(
+    companyId: string,
+    formId: string,
+    data: Record<string, unknown>
+  ): Promise<FormSubmission> {
+    return this.request<FormSubmission>(`/companies/${companyId}/forms/${formId}/submissions`, {
+      method: 'POST',
+      body: JSON.stringify({ data }),
+    })
+  }
   async getCompanySubmissions(companyId: string): Promise<FormSubmission[]> {
     return this.request<FormSubmission[]>(`/companies/${companyId}/submissions`)
   }

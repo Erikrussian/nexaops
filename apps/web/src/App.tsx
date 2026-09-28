@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Navbar } from './components/Navbar'
 import { Dashboard } from './components/Dashboard'
-import { Building2, GitBranch, FileSpreadsheet, ShieldCheck } from 'lucide-react'
+import { FormsManager } from './components/FormsManager'
+import { Building2, GitBranch, ShieldCheck } from 'lucide-react'
 
 export function App() {
   const [currentTab, setCurrentTab] = useState<string>('dashboard')
@@ -17,6 +18,8 @@ export function App() {
 
       <main style={{ flex: 1 }}>
         {currentTab === 'dashboard' && <Dashboard />}
+
+        {currentTab === 'forms' && <FormsManager />}
 
         {currentTab === 'companies' && (
           <div className="container animate-fade-in" style={{ padding: '3rem 1.5rem' }}>
@@ -80,36 +83,6 @@ export function App() {
           </div>
         )}
 
-        {currentTab === 'forms' && (
-          <div className="container animate-fade-in" style={{ padding: '3rem 1.5rem' }}>
-            <div className="glass-card" style={{ padding: '2.5rem', textAlign: 'center' }}>
-              <div
-                style={{
-                  width: '64px',
-                  height: '64px',
-                  borderRadius: 'var(--radius-lg)',
-                  background: 'rgba(168, 85, 247, 0.1)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--accent-purple)',
-                  marginBottom: '1rem',
-                }}
-              >
-                <FileSpreadsheet size={32} />
-              </div>
-              <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: 'white', marginBottom: '0.5rem' }}>
-                Trình Xây Dựng Biểu Mẫu Động (Dynamic Form Builder)
-              </h2>
-              <p style={{ color: 'var(--text-secondary)', maxWidth: '520px', margin: '0 auto 1.5rem' }}>
-                Thiết kế biểu mẫu không cần code, lưu trữ schema trên PostgreSQL JSONB và tự động xác thực trường dữ liệu bằng Dynamic Validation Engine.
-              </p>
-              <button className="btn btn-primary" onClick={() => setCurrentTab('dashboard')}>
-                Trở về Dashboard
-              </button>
-            </div>
-          </div>
-        )}
 
         {currentTab === 'audit' && (
           <div className="container animate-fade-in" style={{ padding: '3rem 1.5rem' }}>
