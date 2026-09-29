@@ -19,6 +19,10 @@ export default defineConfig({
         target: 'http://localhost:5066',
         changeOrigin: true,
       },
+      '/company-members': {
+        target: 'http://localhost:5066',
+        changeOrigin: true,
+      },
     },
   },
 })

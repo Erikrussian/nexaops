@@ -2,17 +2,22 @@ import type {
   AuthResponse,
   Company,
   CompanyFormAnalytics,
+  CompanyMember,
+  CreateCompanyRequest,
+  TransferOwnershipRequest,
   Department,
   FormDefinition,
   FormSubmission,
   AuditLog,
   PagedResult,
+  User,
 } from '../types'
 
 const BASE_URL = '' // Uses Vite proxy config
 
 class ApiClient {
   private token: string | null = null
+  private unauthorizedListeners: Array<() => void> = []
 
   constructor() {
     this.token = localStorage.getItem('nexaops_token')
@@ -26,6 +31,18 @@ class ApiClient {
   clearToken() {
     this.token = null
     localStorage.removeItem('nexaops_token')
+  }
+
+  getToken(): string | null {
+    return this.token
+  }
+
+  onUnauthorized(listener: () => void) {
+    this.unauthorizedListeners.push(listener)
+  }
+
+  removeUnauthorized(listener: () => void) {
+    this.unauthorizedListeners = this.unauthorizedListeners.filter((l) => l !== listener)
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -43,13 +60,23 @@ class ApiClient {
       })
 
       if (!response.ok) {
+        if (response.status === 401) {
+          this.unauthorizedListeners.forEach((l) => l())
+        }
+
         let errorData: any
         try {
           errorData = await response.json()
         } catch {
           errorData = { detail: response.statusText }
         }
-        throw new Error(errorData.detail || errorData.message || `Request failed with status ${response.status}`)
+        throw new Error(
+          errorData.detail ||
+          errorData.message ||
+          errorData.title ||
+          (errorData.errors ? Object.values(errorData.errors).flat().join(', ') : null) ||
+          `Request failed with status ${response.status}`
+        )
       }
 
       return await response.json()
@@ -60,6 +87,15 @@ class ApiClient {
   }
 
   // Auth APIs
+  async register(name: string, email: string, password: string): Promise<AuthResponse> {
+    const res = await this.request<AuthResponse>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ name, email, password }),
+    })
+    this.setToken(res.accessToken)
+    return res
+  }
+
   async login(email: string, password: string): Promise<AuthResponse> {
     const res = await this.request<AuthResponse>('/auth/login', {
       method: 'POST',
@@ -69,6 +105,10 @@ class ApiClient {
     return res
   }
 
+  async getMe(): Promise<User> {
+    return this.request<User>('/auth/me')
+  }
+
   // Companies APIs
   async getMyCompanies(): Promise<Company[]> {
     return this.request<Company[]>('/companies')
@@ -76,6 +116,30 @@ class ApiClient {
 
   async getCompanyById(id: string): Promise<Company> {
     return this.request<Company>(`/companies/${id}`)
+  }
+
+  async createCompany(data: CreateCompanyRequest): Promise<Company> {
+    return this.request<Company>('/companies', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async getCompanyMembers(companyId: string): Promise<CompanyMember[]> {
+    return this.request<CompanyMember[]>(`/companies/${companyId}/members`)
+  }
+
+  async transferOwnership(companyId: string, data: TransferOwnershipRequest): Promise<Company> {
+    return this.request<Company>(`/companies/${companyId}/transfer-ownership`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteCompany(companyId: string): Promise<void> {
+    return this.request<void>(`/companies/${companyId}`, {
+      method: 'DELETE',
+    })
   }
 
   // Departments APIs

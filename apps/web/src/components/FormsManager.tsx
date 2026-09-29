@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { FormDefinition, FormStatus } from '../types'
+import { api } from '../services/api'
 import { StatusBadge } from './StatusBadge'
 import { FormBuilderModal } from './FormBuilderModal'
 import { FormSubmissionModal } from './FormSubmissionModal'
@@ -85,7 +86,11 @@ const INITIAL_FORMS: FormDefinition[] = [
   },
 ]
 
-export function FormsManager() {
+interface FormsManagerProps {
+  activeCompany?: import('../types').Company | null
+}
+
+export function FormsManager({ activeCompany }: FormsManagerProps) {
   const [forms, setForms] = useState<FormDefinition[]>(INITIAL_FORMS)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'ALL' | FormStatus>('ALL')
@@ -94,6 +99,27 @@ export function FormsManager() {
   const [isBuilderOpen, setIsBuilderOpen] = useState(false)
   const [testingForm, setTestingForm] = useState<FormDefinition | null>(null)
   const [schemaViewingForm, setSchemaViewingForm] = useState<FormDefinition | null>(null)
+
+  // Fetch real forms when activeCompany changes
+  useEffect(() => {
+    if (!activeCompany?.id) return
+    let isMounted = true
+
+    api
+      .getForms(activeCompany.id)
+      .then((data) => {
+        if (isMounted && data && data.length > 0) {
+          setForms(data)
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not fetch backend forms, retaining local templates:', err.message)
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [activeCompany?.id])
 
   // Filtering
   const filteredForms = forms.filter((f) => {
@@ -108,16 +134,33 @@ export function FormsManager() {
   })
 
   // Handlers
-  const handleSaveNewForm = (newFormData: {
+  const handleSaveNewForm = async (newFormData: {
     title: string
     code: string
     description?: string
     fields: any[]
     status: FormStatus
   }) => {
+    const targetCompanyId = activeCompany?.id || 'comp_01'
+
+    try {
+      if (activeCompany?.id) {
+        const created = await api.createForm(activeCompany.id, {
+          title: newFormData.title,
+          code: newFormData.code,
+          description: newFormData.description,
+          fields: newFormData.fields,
+        })
+        setForms([created, ...forms])
+        return
+      }
+    } catch (err: any) {
+      console.warn('Backend save form failed, saving locally:', err.message)
+    }
+
     const newForm: FormDefinition = {
       id: `f_${Date.now()}`,
-      companyId: 'comp_01',
+      companyId: targetCompanyId,
       title: newFormData.title,
       code: newFormData.code,
       description: newFormData.description,
@@ -134,23 +177,44 @@ export function FormsManager() {
     setForms([newForm, ...forms])
   }
 
-  const handleToggleStatus = (formId: string) => {
+  const handleToggleStatus = async (formId: string) => {
+    const form = forms.find((f) => f.id === formId)
+    if (!form) return
+
+    let nextStatus: FormStatus = 1
+    if (form.status === 1) nextStatus = 2
+    else if (form.status === 2) nextStatus = 1
+
+    if (activeCompany?.id) {
+      try {
+        await api.changeFormStatus(activeCompany.id, formId, nextStatus)
+      } catch (err: any) {
+        console.warn('Backend status update failed, updating locally:', err.message)
+      }
+    }
+
     setForms(
       forms.map((f) => {
         if (f.id !== formId) return f
-        // Cycle: Draft (0) -> Published (1) -> Archived (2) -> Published (1)
-        let nextStatus: FormStatus = 1
-        if (f.status === 1) nextStatus = 2
-        else if (f.status === 2) nextStatus = 1
         return { ...f, status: nextStatus, updatedAt: new Date().toISOString() }
       })
     )
   }
 
-  const handleDeleteForm = (formId: string) => {
-    if (confirm('Bạn có chắc chắn muốn xóa biểu mẫu này khỏi hệ thống?')) {
-      setForms(forms.filter((f) => f.id !== formId))
+  const handleDeleteForm = async (formId: string) => {
+    if (!confirm('Bạn có chắc chắn muốn xóa biểu mẫu này khỏi hệ thống?')) {
+      return
     }
+
+    if (activeCompany?.id) {
+      try {
+        await api.deleteForm(activeCompany.id, formId)
+      } catch (err: any) {
+        console.warn('Backend delete form failed, deleting locally:', err.message)
+      }
+    }
+
+    setForms(forms.filter((f) => f.id !== formId))
   }
 
   // Summary counts

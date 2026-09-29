@@ -14,7 +14,7 @@ export interface User {
 
 export interface AuthResponse {
   accessToken: string
-  refreshToken: string
+  message?: string
   user: User
 }
 
@@ -34,14 +34,33 @@ export interface Company {
   updatedAt: string
 }
 
+export interface CreateCompanyRequest {
+  name: string
+  slug?: string
+  code?: string
+  logo?: string
+  description?: string
+}
+
+export interface TransferOwnershipRequest {
+  newOwnerId: string
+  password: string
+  previousOwnerNewRole: number // 1: Admin, 2: Manager, 3: Member
+}
+
 export interface CompanyMember {
   id: string
   companyId: string
-  userId: string
+  userId?: string
+  user?: User
   userName?: string
   userEmail?: string
-  role: MemberRole
-  status: MemberStatus
+  email: string
+  role: string
+  status: string
+  inviteExpiresAt?: string
+  invitedById?: string
+  invitedBy?: User
   createdAt: string
   updatedAt: string
 }
