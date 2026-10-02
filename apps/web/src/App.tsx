@@ -4,10 +4,11 @@ import { Navbar } from './components/Navbar'
 import { Dashboard } from './components/Dashboard'
 import { FormsManager } from './components/FormsManager'
 import { CompaniesManager } from './components/CompaniesManager'
+import { DepartmentsManager } from './components/DepartmentsManager'
 import { AuthModal } from './components/AuthModal'
 import { api } from './services/api'
 import type { Company } from './types'
-import { GitBranch, ShieldCheck, LogIn, Sparkles, Building2 } from 'lucide-react'
+import { ShieldCheck, LogIn, Sparkles, Building2 } from 'lucide-react'
 
 function AppContent() {
   const { isAuthenticated, isLoading } = useAuth()
@@ -158,37 +159,7 @@ function AppContent() {
           )
         )}
 
-        {currentTab === 'departments' && (
-          <div className="container animate-fade-in" style={{ padding: '3rem 1.5rem' }}>
-            <div className="glass-card" style={{ padding: '2.5rem', textAlign: 'center', maxWidth: '640px', margin: '0 auto' }}>
-              <div
-                style={{
-                  width: '64px',
-                  height: '64px',
-                  borderRadius: 'var(--radius-lg)',
-                  background: 'rgba(6, 182, 212, 0.1)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--accent-cyan)',
-                  marginBottom: '1rem',
-                }}
-              >
-                <GitBranch size={32} />
-              </div>
-              <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: 'white', marginBottom: '0.5rem' }}>
-                Cơ Cấu Phòng Ban Phân Cấp (Department Tree Hierarchy)
-              </h2>
-              <p style={{ color: 'var(--text-secondary)', margin: '0 auto 1.5rem', fontSize: '0.9rem', lineHeight: 1.6 }}>
-                Mô hình tổ chức dạng cây phân cấp (Tree Hierarchy) kết nối trực tiếp với <code>departments</code> table trên PostgreSQL.
-                Tính năng này đã được định nghĩa trong kiến trúc Backend và được lên kế hoạch bàn giao ở bước tiếp theo.
-              </p>
-              <button className="btn btn-primary" onClick={() => setCurrentTab('dashboard')}>
-                Trở về Dashboard
-              </button>
-            </div>
-          </div>
-        )}
+        {currentTab === 'departments' && <DepartmentsManager activeCompany={activeCompany} />}
 
         {currentTab === 'audit' && (
           <div className="container animate-fade-in" style={{ padding: '3rem 1.5rem' }}>

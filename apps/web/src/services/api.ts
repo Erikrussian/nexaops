@@ -6,6 +6,9 @@ import type {
   CreateCompanyRequest,
   TransferOwnershipRequest,
   Department,
+  DepartmentTreeNode,
+  CreateDepartmentRequest,
+  UpdateDepartmentRequest,
   FormDefinition,
   FormSubmission,
   AuditLog,
@@ -145,6 +148,30 @@ class ApiClient {
   // Departments APIs
   async getDepartments(companyId: string): Promise<Department[]> {
     return this.request<Department[]>(`/companies/${companyId}/departments`)
+  }
+
+  async getDepartmentsTree(companyId: string): Promise<DepartmentTreeNode[]> {
+    return this.request<DepartmentTreeNode[]>(`/companies/${companyId}/departments?tree=true`)
+  }
+
+  async createDepartment(companyId: string, data: CreateDepartmentRequest): Promise<Department> {
+    return this.request<Department>(`/companies/${companyId}/departments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async updateDepartment(departmentId: string, data: UpdateDepartmentRequest): Promise<Department> {
+    return this.request<Department>(`/departments/${departmentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteDepartment(departmentId: string): Promise<void> {
+    return this.request<void>(`/departments/${departmentId}`, {
+      method: 'DELETE',
+    })
   }
 
   // Forms APIs

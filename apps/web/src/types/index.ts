@@ -73,9 +73,31 @@ export interface Department {
   description?: string
   parentId?: string
   managerId?: string
+  manager?: User
   isActive: boolean
   createdAt: string
   updatedAt: string
+}
+
+export interface DepartmentTreeNode extends Department {
+  children: DepartmentTreeNode[]
+}
+
+export interface CreateDepartmentRequest {
+  name: string
+  code?: string
+  parentId?: string
+  managerId?: string
+  description?: string
+}
+
+export interface UpdateDepartmentRequest {
+  name?: string
+  code?: string
+  parentId?: string
+  managerId?: string
+  description?: string
+  isActive?: boolean
 }
 
 export type FormStatus = 0 | 1 | 2 // 0: Draft, 1: Published, 2: Archived
