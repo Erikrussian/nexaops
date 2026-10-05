@@ -244,8 +244,28 @@ class ApiClient {
   }
 
   // Audit Logs APIs
-  async getAuditLogs(companyId: string, page = 1, pageSize = 10): Promise<PagedResult<AuditLog>> {
-    return this.request<PagedResult<AuditLog>>(`/companies/${companyId}/audit-logs?page=${page}&pageSize=${pageSize}`)
+  async getAuditLogs(
+    companyId: string,
+    filter?: {
+      action?: string
+      entityType?: string
+      actorId?: string
+      fromDate?: string
+      toDate?: string
+      page?: number
+      pageSize?: number
+    }
+  ): Promise<PagedResult<AuditLog>> {
+    const params = new URLSearchParams()
+    if (filter?.page) params.set('page', filter.page.toString())
+    if (filter?.pageSize) params.set('pageSize', filter.pageSize.toString())
+    if (filter?.action) params.set('action', filter.action)
+    if (filter?.entityType) params.set('entityType', filter.entityType)
+    if (filter?.actorId) params.set('actorId', filter.actorId)
+    if (filter?.fromDate) params.set('fromDate', filter.fromDate)
+    if (filter?.toDate) params.set('toDate', filter.toDate)
+    const qs = params.toString() ? `?${params.toString()}` : ''
+    return this.request<PagedResult<AuditLog>>(`/companies/${companyId}/audit-logs${qs}`)
   }
 }
 

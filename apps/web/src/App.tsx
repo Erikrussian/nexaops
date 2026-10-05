@@ -5,10 +5,11 @@ import { Dashboard } from './components/Dashboard'
 import { FormsManager } from './components/FormsManager'
 import { CompaniesManager } from './components/CompaniesManager'
 import { DepartmentsManager } from './components/DepartmentsManager'
+import { AuditLogsManager } from './components/AuditLogsManager'
 import { AuthModal } from './components/AuthModal'
 import { api } from './services/api'
 import type { Company } from './types'
-import { ShieldCheck, LogIn, Sparkles, Building2 } from 'lucide-react'
+import { LogIn, Sparkles, Building2 } from 'lucide-react'
 
 function AppContent() {
   const { isAuthenticated, isLoading } = useAuth()
@@ -161,37 +162,7 @@ function AppContent() {
 
         {currentTab === 'departments' && <DepartmentsManager activeCompany={activeCompany} />}
 
-        {currentTab === 'audit' && (
-          <div className="container animate-fade-in" style={{ padding: '3rem 1.5rem' }}>
-            <div className="glass-card" style={{ padding: '2.5rem', textAlign: 'center', maxWidth: '640px', margin: '0 auto' }}>
-              <div
-                style={{
-                  width: '64px',
-                  height: '64px',
-                  borderRadius: 'var(--radius-lg)',
-                  background: 'rgba(16, 185, 129, 0.1)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--accent-emerald)',
-                  marginBottom: '1rem',
-                }}
-              >
-                <ShieldCheck size={32} />
-              </div>
-              <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: 'white', marginBottom: '0.5rem' }}>
-                Nhật Ký Kiểm Toán Toàn Hệ Thống (Audit Trail)
-              </h2>
-              <p style={{ color: 'var(--text-secondary)', margin: '0 auto 1.5rem', fontSize: '0.9rem', lineHeight: 1.6 }}>
-                Lưu vết 100% mọi hành động nhạy cảm trên hệ thống (chuyển nhượng quyền sở hữu, tạo công ty, duyệt biểu mẫu)
-                vào bảng <code>audit_logs</code> phục vụ kiểm toán bảo mật thông tin.
-              </p>
-              <button className="btn btn-primary" onClick={() => setCurrentTab('dashboard')}>
-                Trở về Dashboard
-              </button>
-            </div>
-          </div>
-        )}
+        {currentTab === 'audit' && <AuditLogsManager activeCompany={activeCompany} />}
       </main>
 
       {/* Auth Modal */}
