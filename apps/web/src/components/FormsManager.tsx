@@ -4,6 +4,7 @@ import { api } from '../services/api'
 import { StatusBadge } from './StatusBadge'
 import { FormBuilderModal } from './FormBuilderModal'
 import { FormSubmissionModal } from './FormSubmissionModal'
+import { FormSubmissionsInbox } from './FormSubmissionsInbox'
 import {
   Plus,
   Search,
@@ -15,6 +16,7 @@ import {
   CheckCircle,
   Archive,
   RefreshCw,
+  Inbox,
 } from 'lucide-react'
 
 // Pre-seeded initial forms showcasing diverse field types
@@ -94,6 +96,10 @@ export function FormsManager({ activeCompany }: FormsManagerProps) {
   const [forms, setForms] = useState<FormDefinition[]>(INITIAL_FORMS)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'ALL' | FormStatus>('ALL')
+
+  // Sub-tabs: 'templates' | 'submissions'
+  const [activeSubTab, setActiveSubTab] = useState<'templates' | 'submissions'>('templates')
+  const [selectedFormForSubmissions, setSelectedFormForSubmissions] = useState<string | null>(null)
 
   // Modals state
   const [isBuilderOpen, setIsBuilderOpen] = useState(false)
@@ -267,11 +273,49 @@ export function FormsManager({ activeCompany }: FormsManagerProps) {
         </button>
       </div>
 
-      {/* Summary KPI Strip */}
+      {/* Sub Navigation Segmented Control */}
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          display: 'flex',
+          gap: '0.65rem',
+          marginBottom: '2rem',
+          borderBottom: '1px solid var(--border-subtle)',
+          paddingBottom: '0.85rem',
+        }}
+      >
+        <button
+          className={`btn ${activeSubTab === 'templates' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setActiveSubTab('templates')}
+          style={{ fontSize: '0.875rem' }}
+        >
+          <FileSpreadsheet size={16} /> Danh Mục Biểu Mẫu ({forms.length})
+        </button>
+        <button
+          className={`btn ${activeSubTab === 'submissions' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => {
+            setSelectedFormForSubmissions(null)
+            setActiveSubTab('submissions')
+          }}
+          style={{ fontSize: '0.875rem' }}
+        >
+          <Inbox size={16} /> Hộp Thư Phê Duyệt Hồ Sơ
+        </button>
+      </div>
+
+      {activeSubTab === 'submissions' ? (
+        <FormSubmissionsInbox
+          activeCompany={activeCompany}
+          forms={forms}
+          preselectedFormId={selectedFormForSubmissions}
+          onClearFormFilter={() => setSelectedFormForSubmissions(null)}
+        />
+      ) : (
+        <>
+          {/* Summary KPI Strip */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
           gap: '1rem',
           marginBottom: '2rem',
         }}
@@ -492,7 +536,7 @@ export function FormsManager({ activeCompany }: FormsManagerProps) {
                   borderTop: '1px solid var(--border-subtle)',
                 }}
               >
-                <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                   {/* Test fill submission */}
                   <button
                     className="btn btn-primary btn-sm"
@@ -500,6 +544,18 @@ export function FormsManager({ activeCompany }: FormsManagerProps) {
                     title="Nộp thử nghiệm hoặc kiểm thử validation"
                   >
                     <Send size={13} /> Nộp Thử
+                  </button>
+
+                  {/* View Submissions */}
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      setSelectedFormForSubmissions(form.id)
+                      setActiveSubTab('submissions')
+                    }}
+                    title="Xem các bài nộp của mẫu này trong Hộp thư phê duyệt"
+                  >
+                    <Inbox size={13} /> Bài Nộp
                   </button>
 
                   {/* View JSONB schema */}
@@ -549,6 +605,8 @@ export function FormsManager({ activeCompany }: FormsManagerProps) {
           ))}
         </div>
       )}
+        </>
+      )}
 
       {/* Modal 1: Form Builder */}
       <FormBuilderModal
@@ -562,6 +620,7 @@ export function FormsManager({ activeCompany }: FormsManagerProps) {
         form={testingForm}
         isOpen={Boolean(testingForm)}
         onClose={() => setTestingForm(null)}
+        companyId={activeCompany?.id}
       />
 
       {/* Modal 3: View JSONB Schema */}
