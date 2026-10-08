@@ -58,12 +58,43 @@ export interface CompanyMember {
   email: string
   role: string
   status: string
+  departmentId?: string
+  department?: Department
   inviteExpiresAt?: string
   invitedById?: string
   invitedBy?: User
   createdAt: string
   updatedAt: string
 }
+
+export interface InviteMemberRequest {
+  email: string
+  role?: number
+  departmentId?: string
+}
+
+export interface InviteMemberResponse {
+  message: string
+  member: CompanyMember
+  inviteLink: string
+}
+
+export interface AcceptInviteRequest {
+  inviteToken: string
+}
+
+export interface AcceptInviteResponse {
+  message: string
+  company: Company
+  role: string
+}
+
+export interface UpdateMemberRequest {
+  role?: number
+  status?: number
+  departmentId?: string
+}
+
 
 export interface Department {
   id: string

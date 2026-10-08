@@ -5,6 +5,7 @@ import { Dashboard } from './components/Dashboard'
 import { FormsManager } from './components/FormsManager'
 import { CompaniesManager } from './components/CompaniesManager'
 import { DepartmentsManager } from './components/DepartmentsManager'
+import { CompanyMembersManager } from './components/CompanyMembersManager'
 import { AuditLogsManager } from './components/AuditLogsManager'
 import { AuthModal } from './components/AuthModal'
 import { api } from './services/api'
@@ -161,6 +162,8 @@ function AppContent() {
         )}
 
         {currentTab === 'departments' && <DepartmentsManager activeCompany={activeCompany} />}
+
+        {currentTab === 'members' && <CompanyMembersManager activeCompany={activeCompany} />}
 
         {currentTab === 'audit' && <AuditLogsManager activeCompany={activeCompany} />}
       </main>

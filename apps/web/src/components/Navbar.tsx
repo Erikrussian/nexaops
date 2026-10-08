@@ -13,6 +13,7 @@ import {
   LogIn,
   Check,
   Plus,
+  Users,
 } from 'lucide-react'
 
 interface NavbarProps {
@@ -40,6 +41,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={17} /> },
     { id: 'companies', label: 'Tổ Chức', icon: <Building2 size={17} /> },
     { id: 'departments', label: 'Phòng Ban', icon: <GitBranch size={17} /> },
+    { id: 'members', label: 'Thành Viên', icon: <Users size={17} /> },
     { id: 'forms', label: 'Biểu Mẫu', icon: <FileSpreadsheet size={17} /> },
     { id: 'audit', label: 'Nhật Ký', icon: <ShieldCheck size={17} /> },
   ]

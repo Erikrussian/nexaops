@@ -14,6 +14,11 @@ import type {
   AuditLog,
   PagedResult,
   User,
+  InviteMemberRequest,
+  InviteMemberResponse,
+  AcceptInviteRequest,
+  AcceptInviteResponse,
+  UpdateMemberRequest,
 } from '../types'
 
 const BASE_URL = '' // Uses Vite proxy config
@@ -130,6 +135,33 @@ class ApiClient {
 
   async getCompanyMembers(companyId: string): Promise<CompanyMember[]> {
     return this.request<CompanyMember[]>(`/companies/${companyId}/members`)
+  }
+
+  async inviteMember(companyId: string, data: InviteMemberRequest): Promise<InviteMemberResponse> {
+    return this.request<InviteMemberResponse>(`/companies/${companyId}/members/invite`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async acceptInvite(data: AcceptInviteRequest): Promise<AcceptInviteResponse> {
+    return this.request<AcceptInviteResponse>('/company-members/accept-invite', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async updateMember(memberId: string, data: UpdateMemberRequest): Promise<CompanyMember> {
+    return this.request<CompanyMember>(`/company-members/${memberId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async removeMember(memberId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/company-members/${memberId}`, {
+      method: 'DELETE',
+    })
   }
 
   async transferOwnership(companyId: string, data: TransferOwnershipRequest): Promise<Company> {
