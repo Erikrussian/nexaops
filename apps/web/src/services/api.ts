@@ -2,6 +2,7 @@ import type {
   AuthResponse,
   Company,
   CompanyFormAnalytics,
+  FormDetailAnalytics,
   CompanyMember,
   CreateCompanyRequest,
   TransferOwnershipRequest,
@@ -273,6 +274,10 @@ class ApiClient {
   // Analytics APIs
   async getCompanyAnalytics(companyId: string, days = 30): Promise<CompanyFormAnalytics> {
     return this.request<CompanyFormAnalytics>(`/companies/${companyId}/forms/analytics/overview?days=${days}`)
+  }
+
+  async getFormAnalytics(companyId: string, formId: string): Promise<FormDetailAnalytics> {
+    return this.request<FormDetailAnalytics>(`/companies/${companyId}/forms/${formId}/analytics`)
   }
 
   // Audit Logs APIs

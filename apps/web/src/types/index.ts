@@ -212,6 +212,20 @@ export interface CompanyFormAnalytics {
   topActiveForms: FormUsageMetric[]
 }
 
+export interface FormDetailAnalytics {
+  formId: string
+  formTitle: string
+  formCode: string
+  version: number
+  status: FormStatus
+  totalSubmissions: number
+  pendingCount: number
+  approvedCount: number
+  rejectedCount: number
+  approvalRatePercentage: number
+  averageReviewTimeHours?: number
+}
+
 export interface AuditLog {
   id: string
   companyId: string

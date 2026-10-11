@@ -132,7 +132,9 @@ function AppContent() {
       )}
 
       <main style={{ flex: 1 }}>
-        {currentTab === 'dashboard' && <Dashboard />}
+        {currentTab === 'dashboard' && (
+          <Dashboard activeCompany={activeCompany} onNavigateTab={handleTabChange} />
+        )}
 
         {currentTab === 'forms' && <FormsManager activeCompany={activeCompany} />}
 
