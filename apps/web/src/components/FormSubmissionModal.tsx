@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { FormDefinition } from '../types'
+import type { FormDefinition, FormSubmission } from '../types'
 import { api } from '../services/api'
 import { Send, CheckCircle2, AlertCircle, X, FileText } from 'lucide-react'
 
@@ -8,18 +8,18 @@ interface FormSubmissionModalProps {
   isOpen: boolean
   onClose: () => void
   companyId?: string
-  onSubmitSuccess?: (submission: any) => void
+  onSubmitSuccess?: (submission: FormSubmission) => void
 }
 
 export function FormSubmissionModal({ form, isOpen, onClose, companyId, onSubmitSuccess }: FormSubmissionModalProps) {
-  const [formData, setFormData] = useState<Record<string, any>>({})
+  const [formData, setFormData] = useState<Record<string, unknown>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [submittedResult, setSubmittedResult] = useState<any | null>(null)
+  const [submittedResult, setSubmittedResult] = useState<FormSubmission | null>(null)
 
   if (!isOpen || !form) return null
 
-  const handleFieldChange = (key: string, value: any) => {
+  const handleFieldChange = (key: string, value: unknown) => {
     setFormData((prev) => ({ ...prev, [key]: value }))
     if (errors[key]) {
       setErrors((prev) => {
@@ -87,32 +87,39 @@ export function FormSubmissionModal({ form, isOpen, onClose, companyId, onSubmit
           onSubmitSuccess(res)
         }
       } else {
-        const receipt = {
+        const receipt: FormSubmission = {
           id: `sub_${Date.now()}`,
           formDefinitionId: form.id,
           formTitle: form.title,
           formCode: form.code,
+          companyId: companyId || 'comp_default',
+          submittedById: 'usr_guest',
           submittedByName: 'Trần Kỹ Sư (Kỹ thuật)',
           data: formData,
           status: 0, // Pending
           createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
         }
         setSubmittedResult(receipt)
         if (onSubmitSuccess) {
           onSubmitSuccess(receipt)
         }
       }
-    } catch (err: any) {
-      console.warn('Backend submission failed, falling back to local simulation:', err.message)
-      const receipt = {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err)
+      console.warn('Backend submission failed, falling back to local simulation:', errMsg)
+      const receipt: FormSubmission = {
         id: `sub_${Date.now()}`,
         formDefinitionId: form.id,
         formTitle: form.title,
         formCode: form.code,
+        companyId: companyId || 'comp_default',
+        submittedById: 'usr_guest',
         submittedByName: 'Trần Kỹ Sư (Kỹ thuật)',
         data: formData,
         status: 0,
         createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       }
       setSubmittedResult(receipt)
       if (onSubmitSuccess) {
@@ -260,7 +267,7 @@ export function FormSubmissionModal({ form, isOpen, onClose, companyId, onSubmit
                       type="text"
                       className="input-control"
                       placeholder={field.placeholder}
-                      value={formData[field.name] || ''}
+                      value={(formData[field.name] as string) || ''}
                       onChange={(e) => handleFieldChange(field.name, e.target.value)}
                     />
                   )}
@@ -271,7 +278,7 @@ export function FormSubmissionModal({ form, isOpen, onClose, companyId, onSubmit
                       type="email"
                       className="input-control"
                       placeholder={field.placeholder || 'example@company.com'}
-                      value={formData[field.name] || ''}
+                      value={(formData[field.name] as string) || ''}
                       onChange={(e) => handleFieldChange(field.name, e.target.value)}
                     />
                   )}
@@ -284,7 +291,7 @@ export function FormSubmissionModal({ form, isOpen, onClose, companyId, onSubmit
                       max={field.max}
                       className="input-control"
                       placeholder={field.placeholder}
-                      value={formData[field.name] ?? ''}
+                      value={(formData[field.name] as number | string) ?? ''}
                       onChange={(e) =>
                         handleFieldChange(
                           field.name,
@@ -299,7 +306,7 @@ export function FormSubmissionModal({ form, isOpen, onClose, companyId, onSubmit
                     <input
                       type="date"
                       className="input-control"
-                      value={formData[field.name] || ''}
+                      value={(formData[field.name] as string) || ''}
                       onChange={(e) => handleFieldChange(field.name, e.target.value)}
                     />
                   )}
@@ -308,7 +315,7 @@ export function FormSubmissionModal({ form, isOpen, onClose, companyId, onSubmit
                   {field.type === 3 && (
                     <select
                       className="input-control"
-                      value={formData[field.name] || ''}
+                      value={(formData[field.name] as string) || ''}
                       onChange={(e) => handleFieldChange(field.name, e.target.value)}
                     >
                       <option value="">-- Vui lòng chọn một giá trị --</option>
@@ -338,7 +345,7 @@ export function FormSubmissionModal({ form, isOpen, onClose, companyId, onSubmit
                     <textarea
                       className="input-control"
                       placeholder={field.placeholder}
-                      value={formData[field.name] || ''}
+                      value={(formData[field.name] as string) || ''}
                       onChange={(e) => handleFieldChange(field.name, e.target.value)}
                     />
                   )}
