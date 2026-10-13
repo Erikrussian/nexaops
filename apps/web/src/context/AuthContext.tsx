@@ -6,11 +6,12 @@ interface AuthContextType {
   user: User | null
   token: string | null
   isLoading: boolean
+  isInitializing: boolean
   isAuthenticated: boolean
   error: string | null
   login: (email: string, password: string) => Promise<void>
   register: (name: string, email: string, password: string) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
   clearError: () => void
 }
 
@@ -19,50 +20,59 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [token, setToken] = useState<string | null>(api.getToken())
-  const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [isLoading, setIsLoading] = useState<boolean>(false)
+  const [isInitializing, setIsInitializing] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
 
-  const logout = useCallback(() => {
-    api.clearToken()
-    setToken(null)
-    setUser(null)
-    setError(null)
+  const logout = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      await api.logout()
+    } catch {
+      // Ignore network errors during logout
+    } finally {
+      api.clearToken()
+      setToken(null)
+      setUser(null)
+      setError(null)
+      setIsLoading(false)
+    }
   }, [])
 
-  // Restore session on mount
+  // Restore session on mount via HttpOnly cookie refresh token
   useEffect(() => {
     let isMounted = true
 
     const initAuth = async () => {
-      const storedToken = api.getToken()
-      if (!storedToken) {
-        if (isMounted) setIsLoading(false)
-        return
-      }
-
       try {
-        const me = await api.getMe()
+        // Attempt silent refresh using HttpOnly cookie
+        const res = await api.refreshToken()
         if (isMounted) {
-          setUser(me)
-          setToken(storedToken)
+          api.setToken(res.accessToken)
+          setToken(res.accessToken)
+          setUser(res.user)
         }
-      } catch (err: any) {
-        console.warn('Session restoration failed or token expired:', err.message)
+      } catch {
+        // No active session or cookie expired
         if (isMounted) {
-          logout()
+          api.clearToken()
+          setToken(null)
+          setUser(null)
         }
       } finally {
         if (isMounted) {
-          setIsLoading(false)
+          setIsInitializing(false)
         }
       }
     }
 
     initAuth()
 
-    // Listen for 401 Unauthorized globally from api
+    // Listen for global 401 Unauthorized from api
     const handleUnauthorized = () => {
-      logout()
+      api.clearToken()
+      setToken(null)
+      setUser(null)
     }
     api.onUnauthorized(handleUnauthorized)
 
@@ -70,13 +80,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isMounted = false
       api.removeUnauthorized(handleUnauthorized)
     }
-  }, [logout])
+  }, [])
 
   const login = async (email: string, password: string) => {
     setIsLoading(true)
     setError(null)
     try {
       const res = await api.login(email, password)
+      api.setToken(res.accessToken)
       setToken(res.accessToken)
       setUser(res.user)
     } catch (err: any) {
@@ -92,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError(null)
     try {
       const res = await api.register(name, email, password)
+      api.setToken(res.accessToken)
       setToken(res.accessToken)
       setUser(res.user)
     } catch (err: any) {
@@ -104,10 +116,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearError = () => setError(null)
 
-  const value = {
+  const value: AuthContextType = {
     user,
     token,
     isLoading,
+    isInitializing,
     isAuthenticated: Boolean(user && token),
     error,
     login,

@@ -17,6 +17,8 @@ export function FormSubmissionModal({ form, isOpen, onClose, companyId, onSubmit
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submittedResult, setSubmittedResult] = useState<FormSubmission | null>(null)
 
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
   if (!isOpen || !form) return null
 
   const handleFieldChange = (key: string, value: unknown) => {
@@ -77,54 +79,23 @@ export function FormSubmissionModal({ form, isOpen, onClose, companyId, onSubmit
     e.preventDefault()
     if (!validate()) return
 
+    if (!companyId) {
+      setSubmitError('Vui lòng chọn tổ chức (workspace) trước khi nộp biểu mẫu.')
+      return
+    }
+
     setIsSubmitting(true)
+    setSubmitError(null)
 
     try {
-      if (companyId) {
-        const res = await api.submitForm(companyId, form.id, formData)
-        setSubmittedResult(res)
-        if (onSubmitSuccess) {
-          onSubmitSuccess(res)
-        }
-      } else {
-        const receipt: FormSubmission = {
-          id: `sub_${Date.now()}`,
-          formDefinitionId: form.id,
-          formTitle: form.title,
-          formCode: form.code,
-          companyId: companyId || 'comp_default',
-          submittedById: 'usr_guest',
-          submittedByName: 'Trần Kỹ Sư (Kỹ thuật)',
-          data: formData,
-          status: 0, // Pending
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }
-        setSubmittedResult(receipt)
-        if (onSubmitSuccess) {
-          onSubmitSuccess(receipt)
-        }
+      const res = await api.submitForm(companyId, form.id, formData)
+      setSubmittedResult(res)
+      if (onSubmitSuccess) {
+        onSubmitSuccess(res)
       }
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err)
-      console.warn('Backend submission failed, falling back to local simulation:', errMsg)
-      const receipt: FormSubmission = {
-        id: `sub_${Date.now()}`,
-        formDefinitionId: form.id,
-        formTitle: form.title,
-        formCode: form.code,
-        companyId: companyId || 'comp_default',
-        submittedById: 'usr_guest',
-        submittedByName: 'Trần Kỹ Sư (Kỹ thuật)',
-        data: formData,
-        status: 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }
-      setSubmittedResult(receipt)
-      if (onSubmitSuccess) {
-        onSubmitSuccess(receipt)
-      }
+      setSubmitError(errMsg || 'Nộp biểu mẫu thất bại. Vui lòng kiểm tra lại quyền hạn hoặc kết nối.')
     } finally {
       setIsSubmitting(false)
     }
@@ -249,6 +220,26 @@ export function FormSubmissionModal({ form, isOpen, onClose, companyId, onSubmit
                   }}
                 >
                   {form.description}
+                </div>
+              )}
+
+              {submitError && (
+                <div
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '0.75rem 1rem',
+                    marginBottom: '1.25rem',
+                    color: 'var(--accent-rose)',
+                    fontSize: '0.85rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                  }}
+                >
+                  <AlertCircle size={16} />
+                  <span>{submitError}</span>
                 </div>
               )}
 

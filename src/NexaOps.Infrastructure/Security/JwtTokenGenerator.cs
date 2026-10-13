@@ -35,7 +35,9 @@ public class JwtTokenGenerator : IJwtTokenGenerator
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.AddDays(_jwtSettings.ExpirationInDays),
+            Expires = _jwtSettings.AccessTokenExpirationMinutes > 0
+                ? DateTime.UtcNow.AddMinutes(_jwtSettings.AccessTokenExpirationMinutes)
+                : DateTime.UtcNow.AddDays(_jwtSettings.ExpirationInDays),
             Issuer = _jwtSettings.Issuer,
             Audience = _jwtSettings.Audience,
             SigningCredentials = new SigningCredentials(

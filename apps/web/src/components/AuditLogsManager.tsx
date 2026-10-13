@@ -156,20 +156,20 @@ export function AuditLogsManager({ activeCompany }: AuditLogsManagerProps) {
 
         const result: PagedResult<AuditLog> = await api.getAuditLogs(activeCompany.id, filter)
 
-        if (result && result.items && result.items.length > 0) {
+        if (result && result.items) {
           setLogs(result.items)
           setTotalCount(result.meta?.total || result.items.length)
           setTotalPages(result.meta?.totalPages || 1)
         } else {
-          // If empty in backend, fallback to demo logs for visual completeness
-          setLogs(INITIAL_DEMO_LOGS)
-          setTotalCount(INITIAL_DEMO_LOGS.length)
+          setLogs([])
+          setTotalCount(0)
           setTotalPages(1)
         }
       } catch (err: any) {
         console.warn('Audit logs API request failed or forbidden (Owner/Admin only):', err.message)
-        // Keep demo logs
-        setLogs(INITIAL_DEMO_LOGS)
+        setLogs([])
+        setTotalCount(0)
+        setTotalPages(1)
       } finally {
         setIsLoading(false)
         setIsRefreshing(false)

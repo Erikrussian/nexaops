@@ -112,7 +112,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   style={{
                     fontWeight: 600,
                     color: 'var(--text-primary)',
-                    maxWidth: '160px',
+                    maxWidth: '140px',
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -120,6 +120,21 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   {activeCompany?.name || 'Chọn tổ chức'}
                 </span>
+                {user?.role && (
+                  <span
+                    style={{
+                      fontSize: '0.65rem',
+                      fontWeight: 700,
+                      padding: '0.15rem 0.4rem',
+                      borderRadius: '4px',
+                      background: 'rgba(99, 102, 241, 0.2)',
+                      color: 'var(--primary-light)',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {activeCompany?.ownerId === user.id ? 'Owner' : user.role}
+                  </span>
+                )}
                 <ChevronDown size={14} color="var(--text-muted)" />
               </button>
 

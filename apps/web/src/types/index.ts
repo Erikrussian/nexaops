@@ -14,8 +14,18 @@ export interface User {
 
 export interface AuthResponse {
   accessToken: string
+  refreshToken?: string
   message?: string
   user: User
+}
+
+export interface UserSession {
+  id: string
+  createdAt: string
+  expiresAt: string
+  createdByIp?: string
+  userAgent?: string
+  isCurrent: boolean
 }
 
 export type MemberRole = 'Owner' | 'Admin' | 'Manager' | 'Member'

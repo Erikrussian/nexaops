@@ -7,4 +7,5 @@ public class AuthResponse
     public string Message { get; init; } = string.Empty;
     public UserResponse User { get; init; } = default!;
     public string AccessToken { get; init; } = string.Empty;
+    public string? RefreshToken { get; init; }
 }

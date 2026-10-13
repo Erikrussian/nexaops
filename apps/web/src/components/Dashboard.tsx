@@ -98,6 +98,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCompany, onNavigateT
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [selectedSubmission, setSelectedSubmission] = useState<FormSubmission | null>(null)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   // Auto-dismiss action success toast
   useEffect(() => {
@@ -107,11 +108,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCompany, onNavigateT
     }
   }, [actionSuccess])
 
+  // Auto-dismiss action error toast
+  useEffect(() => {
+    if (actionError) {
+      const timer = setTimeout(() => setActionError(null), 4500)
+      return () => clearTimeout(timer)
+    }
+  }, [actionError])
+
   // Load live analytics and submissions when activeCompany changes
   const loadDashboardData = useCallback(async () => {
     if (!activeCompany) {
       setAnalytics(null)
-      setSubmissions(FALLBACK_SUBMISSIONS)
+      setSubmissions(isAuthenticated ? [] : FALLBACK_SUBMISSIONS)
       return
     }
 
@@ -120,23 +129,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCompany, onNavigateT
       if (isAuthenticated) {
         const [analyticsRes, submissionsRes] = await Promise.all([
           api.getCompanyAnalytics(activeCompany.id, filterDays).catch(() => null),
-          api.getCompanySubmissions(activeCompany.id).catch(() => FALLBACK_SUBMISSIONS),
+          api.getCompanySubmissions(activeCompany.id).catch(() => []),
         ])
 
-        if (analyticsRes) {
-          setAnalytics(analyticsRes)
-        }
-        if (submissionsRes && submissionsRes.length > 0) {
-          setSubmissions(submissionsRes)
-        } else {
-          setSubmissions(FALLBACK_SUBMISSIONS)
-        }
+        setAnalytics(analyticsRes)
+        setSubmissions(submissionsRes || [])
       } else {
         setSubmissions(FALLBACK_SUBMISSIONS)
       }
     } catch (err) {
       console.warn('Dashboard fetch error:', err)
-      setSubmissions(FALLBACK_SUBMISSIONS)
+      if (isAuthenticated) {
+        setSubmissions([])
+      } else {
+        setSubmissions(FALLBACK_SUBMISSIONS)
+      }
     } finally {
       setIsLoading(false)
     }
@@ -148,33 +155,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCompany, onNavigateT
 
   // Direct Review Action
   const handleReview = async (id: string, newStatus: 1 | 2) => {
-    if (activeCompany && isAuthenticated) {
-      try {
-        const note = newStatus === 1 ? 'Đã phê duyệt nhanh qua Dashboard' : 'Từ chối yêu cầu qua Dashboard'
-        await api.reviewSubmission(activeCompany.id, id, newStatus, note)
-        setActionSuccess(newStatus === 1 ? 'Đã phê duyệt đơn thành công!' : 'Đã từ chối đơn thành công!')
-        loadDashboardData()
-        return
-      } catch (err) {
-        console.warn('Review submission error, falling back locally:', err)
-      }
+    if (!activeCompany || !isAuthenticated) {
+      setActionError('Bạn cần đăng nhập và chọn tổ chức để thực hiện phê duyệt đơn.')
+      return
     }
 
-    // Local fallback update
-    setSubmissions((prev) =>
-      prev.map((s) =>
-        s.id === id
-          ? {
-              ...s,
-              status: newStatus,
-              reviewNotes: newStatus === 1 ? 'Đã phê duyệt nhanh qua Dashboard' : 'Từ chối yêu cầu',
-              reviewedByName: 'Quản trị viên',
-              reviewedAt: new Date().toISOString(),
-            }
-          : s
-      )
-    )
-    setActionSuccess(newStatus === 1 ? 'Đã phê duyệt đơn thành công!' : 'Đã từ chối đơn thành công!')
+    try {
+      const note = newStatus === 1 ? 'Đã phê duyệt nhanh qua Dashboard' : 'Từ chối yêu cầu qua Dashboard'
+      await api.reviewSubmission(activeCompany.id, id, newStatus, note)
+      setActionSuccess(newStatus === 1 ? 'Đã phê duyệt đơn thành công!' : 'Đã từ chối đơn thành công!')
+      loadDashboardData()
+    } catch (err: any) {
+      console.warn('Review submission error:', err)
+      setActionError(err.message || 'Thao tác phê duyệt thất bại. Vui lòng kiểm tra lại quyền hạn.')
+    }
   }
 
   // Trend data: Live from API or curated fallback
@@ -262,6 +256,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCompany, onNavigateT
         >
           <Check size={18} />
           {actionSuccess}
+        </div>
+      )}
+
+      {actionError && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '5rem',
+            right: '2rem',
+            zIndex: 1000,
+            background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.95) 0%, rgba(220, 38, 38, 0.95) 100%)',
+            color: 'white',
+            padding: '0.85rem 1.25rem',
+            borderRadius: 'var(--radius-md)',
+            boxShadow: '0 10px 25px -5px rgba(239, 68, 68, 0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            fontSize: '0.875rem',
+            fontWeight: 600,
+            animation: 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+          }}
+        >
+          <X size={18} />
+          {actionError}
         </div>
       )}
 

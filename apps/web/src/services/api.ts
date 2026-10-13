@@ -20,21 +20,28 @@ import type {
   AcceptInviteRequest,
   AcceptInviteResponse,
   UpdateMemberRequest,
+  UserSession,
 } from '../types'
 
 const BASE_URL = '' // Uses Vite proxy config
 
 class ApiClient {
   private token: string | null = null
+  private isRefreshing: boolean = false
+  private refreshQueue: Array<(token: string | null, error?: Error) => void> = []
   private unauthorizedListeners: Array<() => void> = []
 
   constructor() {
     this.token = localStorage.getItem('nexaops_token')
   }
 
-  setToken(token: string) {
+  setToken(token: string | null) {
     this.token = token
-    localStorage.setItem('nexaops_token', token)
+    if (token) {
+      localStorage.setItem('nexaops_token', token)
+    } else {
+      localStorage.removeItem('nexaops_token')
+    }
   }
 
   clearToken() {
@@ -54,7 +61,7 @@ class ApiClient {
     this.unauthorizedListeners = this.unauthorizedListeners.filter((l) => l !== listener)
   }
 
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  private async request<T>(endpoint: string, options: RequestInit = {}, isRetry: boolean = false): Promise<T> {
     const headers = new Headers(options.headers || {})
     headers.set('Content-Type', 'application/json')
 
@@ -66,11 +73,26 @@ class ApiClient {
       const response = await fetch(`${BASE_URL}${endpoint}`, {
         ...options,
         headers,
+        credentials: 'include', // Ensures HttpOnly cookies (refreshToken) are attached
       })
 
       if (!response.ok) {
+        // Handle 401 Unauthorized
         if (response.status === 401) {
-          this.unauthorizedListeners.forEach((l) => l())
+          const isAuthEndpoint =
+            endpoint.startsWith('/auth/login') ||
+            endpoint.startsWith('/auth/register') ||
+            endpoint.startsWith('/auth/refresh')
+
+          // If not an auth endpoint and we haven't retried yet, perform transparent refresh
+          if (!isAuthEndpoint && !isRetry) {
+            return await this.handleUnauthorizedWithRefresh<T>(endpoint, options)
+          }
+
+          if (isAuthEndpoint && endpoint.startsWith('/auth/refresh')) {
+            this.clearToken()
+            this.unauthorizedListeners.forEach((l) => l())
+          }
         }
 
         let errorData: any
@@ -79,6 +101,7 @@ class ApiClient {
         } catch {
           errorData = { detail: response.statusText }
         }
+
         throw new Error(
           errorData.detail ||
           errorData.message ||
@@ -88,10 +111,51 @@ class ApiClient {
         )
       }
 
+      if (response.status === 204) {
+        return undefined as T
+      }
+
       return await response.json()
     } catch (err: any) {
       console.warn(`API request to ${endpoint} failed:`, err.message)
       throw err
+    }
+  }
+
+  private async handleUnauthorizedWithRefresh<T>(endpoint: string, options: RequestInit): Promise<T> {
+    if (this.isRefreshing) {
+      return new Promise<T>((resolve, reject) => {
+        this.refreshQueue.push((newToken, err) => {
+          if (err || !newToken) {
+            reject(err || new Error('Phiên đăng nhập đã hết hạn'))
+          } else {
+            resolve(this.request<T>(endpoint, options, true))
+          }
+        })
+      })
+    }
+
+    this.isRefreshing = true
+
+    try {
+      const refreshRes = await this.refreshToken()
+      const newToken = refreshRes.accessToken
+
+      const queue = [...this.refreshQueue]
+      this.refreshQueue = []
+      queue.forEach((callback) => callback(newToken))
+
+      return await this.request<T>(endpoint, options, true)
+    } catch (refreshErr: any) {
+      const queue = [...this.refreshQueue]
+      this.refreshQueue = []
+      queue.forEach((callback) => callback(null, refreshErr))
+
+      this.clearToken()
+      this.unauthorizedListeners.forEach((l) => l())
+      throw refreshErr
+    } finally {
+      this.isRefreshing = false
     }
   }
 
@@ -100,6 +164,7 @@ class ApiClient {
     const res = await this.request<AuthResponse>('/auth/register', {
       method: 'POST',
       body: JSON.stringify({ name, email, password }),
+      credentials: 'include',
     })
     this.setToken(res.accessToken)
     return res
@@ -109,9 +174,55 @@ class ApiClient {
     const res = await this.request<AuthResponse>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
+      credentials: 'include',
     })
     this.setToken(res.accessToken)
     return res
+  }
+
+  async refreshToken(): Promise<AuthResponse> {
+    const res = await this.request<AuthResponse>('/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+    })
+    this.setToken(res.accessToken)
+    return res
+  }
+
+  async logout(): Promise<void> {
+    try {
+      await this.request<void>('/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      })
+    } catch {
+      // Ignore network errors during logout
+    } finally {
+      this.clearToken()
+      this.unauthorizedListeners.forEach((l) => l())
+    }
+  }
+
+  async logoutAll(): Promise<void> {
+    try {
+      await this.request<void>('/auth/logout-all', {
+        method: 'POST',
+        credentials: 'include',
+      })
+    } finally {
+      this.clearToken()
+      this.unauthorizedListeners.forEach((l) => l())
+    }
+  }
+
+  async getSessions(): Promise<UserSession[]> {
+    return this.request<UserSession[]>('/auth/sessions')
+  }
+
+  async revokeSession(sessionId: string): Promise<void> {
+    await this.request<void>(`/auth/sessions/${sessionId}`, {
+      method: 'DELETE',
+    })
   }
 
   async getMe(): Promise<User> {

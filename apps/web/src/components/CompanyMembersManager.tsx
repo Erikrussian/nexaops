@@ -145,18 +145,20 @@ export function CompanyMembersManager({ activeCompany }: CompanyMembersManagerPr
     try {
       if (isAuthenticated) {
         const [membersData, deptsData] = await Promise.all([
-          api.getCompanyMembers(activeCompany.id).catch(() => INITIAL_MOCK_MEMBERS),
+          api.getCompanyMembers(activeCompany.id),
           api.getDepartments(activeCompany.id).catch(() => []),
         ])
-        setMembers(membersData && membersData.length > 0 ? membersData : INITIAL_MOCK_MEMBERS)
+        setMembers(membersData || [])
         setDepartments(deptsData || [])
       } else {
         setMembers(INITIAL_MOCK_MEMBERS)
         setDepartments([])
       }
     } catch (err: unknown) {
-      console.warn('Failed to fetch company members, falling back to mock:', err)
-      setMembers(INITIAL_MOCK_MEMBERS)
+      const errMsg = err instanceof Error ? err.message : String(err)
+      console.warn('Failed to fetch company members:', err)
+      setError(errMsg || 'Không thể tải danh sách thành viên.')
+      setMembers([])
     } finally {
       setIsLoading(false)
     }
