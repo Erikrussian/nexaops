@@ -175,7 +175,71 @@ export interface FormDefinition {
   updatedAt: string
 }
 
-export type SubmissionStatus = 0 | 1 | 2 | 3 // 0: Pending, 1: Approved, 2: Rejected, 3: Draft
+export type SubmissionStatus = 0 | 1 | 2 | 3 | 4 | 5 // 0: Pending, 1: Approved, 2: Rejected, 3: Draft, 4: InReview, 5: Cancelled
+
+export type ApprovalStepType = 0 | 1 | 2 | 3 // 0: Role, 1: DepartmentManager, 2: SpecificUser, 3: CompanyOwner
+export type ApprovalStepStatus = 0 | 1 | 2 | 3 // 0: Pending, 1: Approved, 2: Rejected, 3: Skipped
+export type NotificationType = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+
+export interface ApprovalStep {
+  id: string
+  workflowId: string
+  orderIndex: number
+  name: string
+  stepType: ApprovalStepType
+  approverRole?: number // 0: Owner, 1: Admin, 2: Manager, 3: Member
+  specificApproverUserId?: string
+  specificApproverUserName?: string
+  allowSelfApproval: boolean
+  timeLimitHours?: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ApprovalWorkflow {
+  id: string
+  companyId: string
+  formDefinitionId: string
+  name: string
+  description?: string
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+  steps: ApprovalStep[]
+}
+
+export interface SubmissionApprovalStep {
+  id: string
+  submissionId: string
+  orderIndex: number
+  stepName: string
+  stepType: ApprovalStepType
+  approverRole?: number
+  specificApproverUserId?: string
+  specificApproverUserName?: string
+  allowSelfApproval: boolean
+  status: ApprovalStepStatus
+  reviewedById?: string
+  reviewedByName?: string
+  reviewedAt?: string
+  reviewNotes?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AppNotification {
+  id: string
+  userId: string
+  companyId: string
+  type: NotificationType
+  title: string
+  message: string
+  linkUrl?: string
+  isRead: boolean
+  readAt?: string
+  createdAt: string
+}
 
 export interface FormSubmission {
   id: string
@@ -187,12 +251,14 @@ export interface FormSubmission {
   submittedByName?: string
   data: Record<string, unknown>
   status: SubmissionStatus
+  currentStepOrder?: number
   reviewNotes?: string
   reviewedById?: string
   reviewedByName?: string
   reviewedAt?: string
   createdAt: string
   updatedAt: string
+  approvalSteps?: SubmissionApprovalStep[]
 }
 
 export interface DailySubmissionMetric {

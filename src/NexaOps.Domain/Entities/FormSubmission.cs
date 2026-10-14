@@ -13,10 +13,13 @@ public class FormSubmission
     public User? SubmittedBy { get; set; }
     public string DataJson { get; set; } = "{}";
     public SubmissionStatus Status { get; set; } = SubmissionStatus.Pending;
+    public int CurrentStepOrder { get; set; } = 1;
     public string? ReviewNotes { get; set; }
     public Guid? ReviewedById { get; set; }
     public User? ReviewedBy { get; set; }
     public DateTime? ReviewedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<SubmissionApprovalStep> ApprovalSteps { get; set; } = new List<SubmissionApprovalStep>();
 }

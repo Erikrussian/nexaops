@@ -19,6 +19,9 @@ public class FormSubmissionConfiguration : IEntityTypeConfiguration<FormSubmissi
         builder.Property(s => s.Status)
             .IsRequired();
 
+        builder.Property(s => s.CurrentStepOrder)
+            .HasDefaultValue(1);
+
         builder.Property(s => s.ReviewNotes)
             .HasMaxLength(2000);
 

@@ -13,5 +13,9 @@ public interface IApplicationDbContext
     DbSet<FormSubmission> FormSubmissions { get; }
     DbSet<AuditLog> AuditLogs { get; }
     DbSet<RefreshToken> RefreshTokens { get; }
+    DbSet<ApprovalWorkflow> ApprovalWorkflows { get; }
+    DbSet<ApprovalStep> ApprovalSteps { get; }
+    DbSet<SubmissionApprovalStep> SubmissionApprovalSteps { get; }
+    DbSet<Notification> Notifications { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

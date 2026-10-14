@@ -22,6 +22,104 @@ namespace NexaOps.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("NexaOps.Domain.Entities.ApprovalStep", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AllowSelfApproval")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<int?>("ApproverRole")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("OrderIndex")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("SpecificApproverUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("StepType")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("TimeLimitHours")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("WorkflowId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SpecificApproverUserId");
+
+                    b.HasIndex("WorkflowId", "OrderIndex")
+                        .IsUnique();
+
+                    b.ToTable("approval_steps", (string)null);
+                });
+
+            modelBuilder.Entity("NexaOps.Domain.Entities.ApprovalWorkflow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid>("FormDefinitionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FormDefinitionId")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "FormDefinitionId")
+                        .IsUnique();
+
+                    b.ToTable("approval_workflows", (string)null);
+                });
+
             modelBuilder.Entity("NexaOps.Domain.Entities.AuditLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -322,6 +420,11 @@ namespace NexaOps.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("CurrentStepOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
                     b.Property<string>("DataJson")
                         .IsRequired()
                         .HasColumnType("jsonb");
@@ -363,6 +466,55 @@ namespace NexaOps.Infrastructure.Persistence.Migrations
                     b.HasIndex("CompanyId", "SubmittedById");
 
                     b.ToTable("form_submissions", (string)null);
+                });
+
+            modelBuilder.Entity("NexaOps.Domain.Entities.Notification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsRead")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("LinkUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("ReadAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "CreatedAt");
+
+                    b.HasIndex("UserId", "IsRead");
+
+                    b.ToTable("notifications", (string)null);
                 });
 
             modelBuilder.Entity("NexaOps.Domain.Entities.RefreshToken", b =>
@@ -418,6 +570,66 @@ namespace NexaOps.Infrastructure.Persistence.Migrations
                     b.ToTable("refresh_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("NexaOps.Domain.Entities.SubmissionApprovalStep", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AllowSelfApproval")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("ApproverRole")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("OrderIndex")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ReviewNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReviewedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("SpecificApproverUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("StepName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("StepType")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SubmissionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReviewedById");
+
+                    b.HasIndex("SpecificApproverUserId");
+
+                    b.HasIndex("SubmissionId", "OrderIndex")
+                        .IsUnique();
+
+                    b.ToTable("submission_approval_steps", (string)null);
+                });
+
             modelBuilder.Entity("NexaOps.Domain.Entities.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -469,6 +681,43 @@ namespace NexaOps.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("users", (string)null);
+                });
+
+            modelBuilder.Entity("NexaOps.Domain.Entities.ApprovalStep", b =>
+                {
+                    b.HasOne("NexaOps.Domain.Entities.User", "SpecificApproverUser")
+                        .WithMany()
+                        .HasForeignKey("SpecificApproverUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("NexaOps.Domain.Entities.ApprovalWorkflow", "Workflow")
+                        .WithMany("Steps")
+                        .HasForeignKey("WorkflowId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("SpecificApproverUser");
+
+                    b.Navigation("Workflow");
+                });
+
+            modelBuilder.Entity("NexaOps.Domain.Entities.ApprovalWorkflow", b =>
+                {
+                    b.HasOne("NexaOps.Domain.Entities.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NexaOps.Domain.Entities.FormDefinition", "FormDefinition")
+                        .WithOne("ApprovalWorkflow")
+                        .HasForeignKey("NexaOps.Domain.Entities.ApprovalWorkflow", "FormDefinitionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("FormDefinition");
                 });
 
             modelBuilder.Entity("NexaOps.Domain.Entities.AuditLog", b =>
@@ -617,6 +866,25 @@ namespace NexaOps.Infrastructure.Persistence.Migrations
                     b.Navigation("SubmittedBy");
                 });
 
+            modelBuilder.Entity("NexaOps.Domain.Entities.Notification", b =>
+                {
+                    b.HasOne("NexaOps.Domain.Entities.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NexaOps.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("NexaOps.Domain.Entities.RefreshToken", b =>
                 {
                     b.HasOne("NexaOps.Domain.Entities.User", "User")
@@ -628,9 +896,49 @@ namespace NexaOps.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("NexaOps.Domain.Entities.SubmissionApprovalStep", b =>
+                {
+                    b.HasOne("NexaOps.Domain.Entities.User", "ReviewedBy")
+                        .WithMany()
+                        .HasForeignKey("ReviewedById")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("NexaOps.Domain.Entities.User", "SpecificApproverUser")
+                        .WithMany()
+                        .HasForeignKey("SpecificApproverUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("NexaOps.Domain.Entities.FormSubmission", "Submission")
+                        .WithMany("ApprovalSteps")
+                        .HasForeignKey("SubmissionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ReviewedBy");
+
+                    b.Navigation("SpecificApproverUser");
+
+                    b.Navigation("Submission");
+                });
+
+            modelBuilder.Entity("NexaOps.Domain.Entities.ApprovalWorkflow", b =>
+                {
+                    b.Navigation("Steps");
+                });
+
             modelBuilder.Entity("NexaOps.Domain.Entities.Department", b =>
                 {
                     b.Navigation("Children");
+                });
+
+            modelBuilder.Entity("NexaOps.Domain.Entities.FormDefinition", b =>
+                {
+                    b.Navigation("ApprovalWorkflow");
+                });
+
+            modelBuilder.Entity("NexaOps.Domain.Entities.FormSubmission", b =>
+                {
+                    b.Navigation("ApprovalSteps");
                 });
 #pragma warning restore 612, 618
         }

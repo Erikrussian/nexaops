@@ -19,4 +19,6 @@ public class FormDefinition
     public User? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ApprovalWorkflow? ApprovalWorkflow { get; set; }
 }
