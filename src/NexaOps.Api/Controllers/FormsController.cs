@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexaOps.Application.Forms.DTOs;
 using NexaOps.Application.Forms.Services;
+using NexaOps.Application.Workflows.DTOs;
+using NexaOps.Application.Workflows.Services;
 using NexaOps.Domain.Enums;
 
 namespace NexaOps.Api.Controllers;
@@ -13,15 +15,18 @@ public class FormsController : ControllerBase
     private readonly IFormService _formService;
     private readonly IFormSubmissionService _submissionService;
     private readonly IFormAnalyticsService _analyticsService;
+    private readonly IApprovalWorkflowService _workflowService;
 
     public FormsController(
         IFormService formService,
         IFormSubmissionService submissionService,
-        IFormAnalyticsService analyticsService)
+        IFormAnalyticsService analyticsService,
+        IApprovalWorkflowService workflowService)
     {
         _formService = formService;
         _submissionService = submissionService;
         _analyticsService = analyticsService;
+        _workflowService = workflowService;
     }
 
     /// <summary>
@@ -262,6 +267,88 @@ public class FormsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _analyticsService.GetFormAnalyticsAsync(companyId, formId, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// GET /companies/{companyId}/forms/{formId}/workflow - Lấy cấu hình quy trình phê duyệt của biểu mẫu
+    /// </summary>
+    [HttpGet("companies/{companyId:guid}/forms/{formId:guid}/workflow")]
+    [ProducesResponseType(typeof(ApprovalWorkflowDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ApprovalWorkflowDto>> GetWorkflow(
+        [FromRoute] Guid companyId,
+        [FromRoute] Guid formId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _workflowService.GetWorkflowByFormAsync(companyId, formId, cancellationToken);
+        if (result == null) return NotFound(new ProblemDetails { Title = "Biểu mẫu chưa cấu hình quy trình phê duyệt" });
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// POST /companies/{companyId}/forms/{formId}/workflow - Tạo hoặc cập nhật quy trình phê duyệt
+    /// </summary>
+    [HttpPost("companies/{companyId:guid}/forms/{formId:guid}/workflow")]
+    [ProducesResponseType(typeof(ApprovalWorkflowDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<ApprovalWorkflowDto>> SaveWorkflow(
+        [FromRoute] Guid companyId,
+        [FromRoute] Guid formId,
+        [FromBody] CreateOrUpdateWorkflowDto dto,
+        CancellationToken cancellationToken)
+    {
+        var result = await _workflowService.CreateOrUpdateWorkflowAsync(companyId, formId, dto, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// DELETE /companies/{companyId}/forms/{formId}/workflow - Xóa quy trình phê duyệt của biểu mẫu
+    /// </summary>
+    [HttpDelete("companies/{companyId:guid}/forms/{formId:guid}/workflow")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> DeleteWorkflow(
+        [FromRoute] Guid companyId,
+        [FromRoute] Guid formId,
+        CancellationToken cancellationToken)
+    {
+        await _workflowService.DeleteWorkflowAsync(companyId, formId, cancellationToken);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// GET /companies/{companyId}/submissions/{submissionId}/workflow-timeline - Lấy tiến trình các bước phê duyệt hồ sơ
+    /// </summary>
+    [HttpGet("companies/{companyId:guid}/submissions/{submissionId:guid}/workflow-timeline")]
+    [ProducesResponseType(typeof(List<SubmissionApprovalStepDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<List<SubmissionApprovalStepDto>>> GetWorkflowTimeline(
+        [FromRoute] Guid companyId,
+        [FromRoute] Guid submissionId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _workflowService.GetSubmissionApprovalTimelineAsync(companyId, submissionId, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// POST /companies/{companyId}/submissions/{submissionId}/steps/{stepOrder}/process - Phê duyệt hoặc từ chối một bước
+    /// </summary>
+    [HttpPost("companies/{companyId:guid}/submissions/{submissionId:guid}/steps/{stepOrder:int}/process")]
+    [ProducesResponseType(typeof(SubmissionApprovalStepDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SubmissionApprovalStepDto>> ProcessStepApproval(
+        [FromRoute] Guid companyId,
+        [FromRoute] Guid submissionId,
+        [FromRoute] int stepOrder,
+        [FromBody] StepApprovalActionDto dto,
+        CancellationToken cancellationToken)
+    {
+        var result = await _workflowService.ProcessStepApprovalAsync(companyId, submissionId, stepOrder, dto, cancellationToken);
         return Ok(result);
     }
 }

@@ -24,10 +24,12 @@ public class FormSubmissionDto
     public string? SubmittedByName { get; set; }
     public Dictionary<string, object?> Data { get; set; } = new();
     public SubmissionStatus Status { get; set; }
+    public int CurrentStepOrder { get; set; } = 1;
     public string? ReviewNotes { get; set; }
     public Guid? ReviewedById { get; set; }
     public string? ReviewedByName { get; set; }
     public DateTime? ReviewedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    public List<NexaOps.Application.Workflows.DTOs.SubmissionApprovalStepDto> ApprovalSteps { get; set; } = new();
 }

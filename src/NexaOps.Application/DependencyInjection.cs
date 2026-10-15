@@ -7,7 +7,9 @@ using NexaOps.Application.Companies.Services;
 using NexaOps.Application.CompanyMembers.Services;
 using NexaOps.Application.Departments.Services;
 using NexaOps.Application.Forms.Services;
+using NexaOps.Application.Notifications.Services;
 using NexaOps.Application.Users.Services;
+using NexaOps.Application.Workflows.Services;
 
 namespace NexaOps.Application;
 
@@ -26,6 +28,8 @@ public static class DependencyInjection
         services.AddScoped<IFormSubmissionService, FormSubmissionService>();
         services.AddScoped<IAuditLogService, AuditLogService>();
         services.AddScoped<IFormAnalyticsService, FormAnalyticsService>();
+        services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<IApprovalWorkflowService, ApprovalWorkflowService>();
         return services;
     }
 }
