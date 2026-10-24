@@ -326,3 +326,32 @@ export interface PagedResult<T> {
     totalPages: number
   }
 }
+
+export interface CreateOrUpdateWorkflowRequest {
+  name: string
+  description?: string
+  isActive: boolean
+  steps: Array<{
+    orderIndex: number
+    name: string
+    stepType: ApprovalStepType
+    approverRole?: number | null
+    specificApproverUserId?: string | null
+    allowSelfApproval: boolean
+    timeLimitHours?: number | null
+  }>
+}
+
+export interface StepApprovalActionRequest {
+  status: ApprovalStepStatus // 1: Approved, 2: Rejected
+  reviewNotes?: string
+}
+
+export interface NotificationListResponse {
+  items: AppNotification[]
+  total: number
+  unreadCount: number
+  page: number
+  pageSize: number
+}
+

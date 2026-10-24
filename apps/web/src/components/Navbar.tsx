@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import type { Company } from '../types'
 import { useAuth } from '../context/AuthContext'
+import { NotificationCenter } from './NotificationCenter'
 import {
   Layers,
   LayoutDashboard,
@@ -230,6 +231,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
               )}
             </div>
+          )}
+
+          {/* Notification Center */}
+          {isAuthenticated && (
+            <NotificationCenter
+              companyId={activeCompany?.id}
+              onNavigateToSubmissions={() => setCurrentTab('forms')}
+            />
           )}
 
           {/* User Profile or Login Button */}

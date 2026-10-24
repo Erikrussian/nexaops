@@ -1,5 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
-import type { FormSubmission, FormDefinition, SubmissionStatus, Company } from '../types'
+import type {
+  FormSubmission,
+  FormDefinition,
+  SubmissionStatus,
+  Company,
+  SubmissionApprovalStep,
+  ApprovalStepStatus,
+} from '../types'
 import { api } from '../services/api'
 import { StatusBadge } from './StatusBadge'
 import {
@@ -16,6 +23,9 @@ import {
   Check,
   X,
   FileCheck,
+  GitMerge,
+  AlertTriangle,
+  UserCheck,
 } from 'lucide-react'
 
 // Initial realistic pre-seeded submissions for instant showcase & test workflows
@@ -134,6 +144,9 @@ export function FormSubmissionsInbox({
   const [isSubmittingReview, setIsSubmittingReview] = useState(false)
   const [showJsonInspector, setShowJsonInspector] = useState(false)
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null)
+  const [timeline, setTimeline] = useState<SubmissionApprovalStep[]>([])
+  const [isLoadingTimeline, setIsLoadingTimeline] = useState(false)
+  const [stepReviewError, setStepReviewError] = useState<string | null>(null)
 
   // Sync preselectedFormId when changed from parent
   useEffect(() => {
@@ -201,11 +214,72 @@ export function FormSubmissionsInbox({
   }, [submissions])
 
   // Open review modal
-  const handleOpenReview = (submission: FormSubmission) => {
+  const handleOpenReview = async (submission: FormSubmission) => {
     setActiveReviewSubmission(submission)
     setReviewNote(submission.reviewNotes || '')
     setShowJsonInspector(false)
     setActionSuccessMsg(null)
+    setStepReviewError(null)
+
+    if (submission.approvalSteps && submission.approvalSteps.length > 0) {
+      setTimeline(submission.approvalSteps)
+    } else {
+      setTimeline([])
+    }
+
+    if (activeCompany?.id) {
+      setIsLoadingTimeline(true)
+      try {
+        const steps = await api.getSubmissionWorkflowTimeline(activeCompany.id, submission.id)
+        if (steps && steps.length > 0) {
+          setTimeline(steps)
+        }
+      } catch {
+        // Fall back to submission.approvalSteps
+      } finally {
+        setIsLoadingTimeline(false)
+      }
+    }
+  }
+
+  // Handle Multi-step Workflow Step Approval Action
+  const handleProcessStepReview = async (order: number, stepStatus: ApprovalStepStatus) => {
+    if (!activeReviewSubmission || !activeCompany?.id) return
+    setIsSubmittingReview(true)
+    setStepReviewError(null)
+    setActionSuccessMsg(null)
+
+    try {
+      const updatedSub = await api.processStepApproval(
+        activeCompany.id,
+        activeReviewSubmission.id,
+        order,
+        {
+          status: stepStatus,
+          reviewNotes: reviewNote.trim() || undefined,
+        }
+      )
+
+      // Refresh timeline from server
+      const refreshedSteps = await api.getSubmissionWorkflowTimeline(
+        activeCompany.id,
+        activeReviewSubmission.id
+      )
+      setTimeline(refreshedSteps)
+      setActiveReviewSubmission(updatedSub)
+      setSubmissions((prev) => prev.map((s) => (s.id === updatedSub.id ? updatedSub : s)))
+
+      setActionSuccessMsg(
+        stepStatus === 1
+          ? `Đã phê duyệt Bước ${order} thành công.`
+          : `Đã từ chối Bước ${order}. Các bước tiếp theo được hủy bỏ.`
+      )
+      setReviewNote('')
+    } catch (err: any) {
+      setStepReviewError(err.message || 'Lỗi khi xử lý phê duyệt bước')
+    } finally {
+      setIsSubmittingReview(false)
+    }
   }
 
   // Handle Review action (Approve or Reject)
@@ -802,81 +876,360 @@ export function FormSubmissionsInbox({
                 )}
               </div>
 
-              {/* Review Decision & Notes Section */}
-              <div
-                style={{
-                  borderTop: '1px solid var(--border-subtle)',
-                  paddingTop: '1.25rem',
-                  marginTop: '1.25rem',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                  <MessageSquare size={16} color="var(--primary-light)" />
-                  <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'white' }}>
-                    Quyết Định Thẩm Định Của Quản Lý
-                  </h4>
+              {/* Step Review Error Alert */}
+              {stepReviewError && (
+                <div
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    border: '1px solid rgba(239, 68, 68, 0.4)',
+                    padding: '0.75rem 1rem',
+                    borderRadius: 'var(--radius-md)',
+                    color: '#fca5a5',
+                    fontSize: '0.85rem',
+                    marginBottom: '1rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                  }}
+                >
+                  <AlertTriangle size={16} />
+                  {stepReviewError}
                 </div>
+              )}
 
-                <div style={{ marginBottom: '1rem' }}>
-                  <label
-                    style={{
-                      display: 'block',
-                      fontSize: '0.8rem',
-                      color: 'var(--text-secondary)',
-                      marginBottom: '0.4rem',
-                    }}
-                  >
-                    Ý kiến phê duyệt / Lý do từ chối (Ghi chú phản hồi cho người nộp)
-                  </label>
-                  <textarea
-                    className="input-field"
-                    rows={3}
-                    placeholder="Nhập ghi chú phản hồi (ví dụ: Đồng ý cấp thiết bị, hoặc Vui lòng chỉnh sửa ngân sách...)"
-                    value={reviewNote}
-                    onChange={(e) => setReviewNote(e.target.value)}
-                    style={{ width: '100%', resize: 'vertical' }}
-                  />
-                </div>
+              {/* MULTI-STEP APPROVAL WORKFLOW SECTION */}
+              {timeline.length > 0 ? (
+                <div
+                  style={{
+                    borderTop: '1px solid var(--border-subtle)',
+                    paddingTop: '1.25rem',
+                    marginTop: '1.25rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                    <GitMerge size={17} color="var(--accent-purple)" />
+                    <h4 style={{ fontSize: '1rem', fontWeight: 700, color: 'white', margin: 0 }}>
+                      Tiến Trình Phê Duyệt Tuần Tự ({timeline.length} Cấp Độ)
+                    </h4>
+                  </div>
 
-                {/* Action Buttons */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', justifyContent: 'flex-end' }}>
-                  {activeReviewSubmission.status !== 0 && (
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => handleProcessReview(0)}
-                      disabled={isSubmittingReview}
-                      title="Chuyển lại về trạng thái chờ xử lý"
-                    >
-                      <Clock size={14} /> Chuyển về Chờ Duyệt
-                    </button>
+                  {/* Stepper Timeline Visualizer */}
+                  {isLoadingTimeline ? (
+                    <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      Đang tải tiến trình phê duyệt...
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginBottom: '1.5rem' }}>
+                    {timeline.map((step, idx) => {
+                      const isPending = step.status === 0
+                      const isApproved = step.status === 1
+                      const isRejected = step.status === 2
+                      const isSkipped = step.status === 3
+                      const isCurrentActionable =
+                        isPending &&
+                        (activeReviewSubmission.currentStepOrder === step.orderIndex ||
+                          !activeReviewSubmission.currentStepOrder)
+
+                      return (
+                        <div
+                          key={step.id || idx}
+                          style={{
+                            background: isCurrentActionable
+                              ? 'rgba(99, 102, 241, 0.08)'
+                              : 'rgba(255, 255, 255, 0.02)',
+                            border: '1px solid',
+                            borderColor: isCurrentActionable
+                              ? 'var(--primary)'
+                              : isApproved
+                              ? 'rgba(16, 185, 129, 0.3)'
+                              : isRejected
+                              ? 'rgba(244, 63, 94, 0.3)'
+                              : 'var(--border-subtle)',
+                            borderRadius: 'var(--radius-md)',
+                            padding: '1rem',
+                            display: 'flex',
+                            gap: '0.85rem',
+                            alignItems: 'flex-start',
+                            position: 'relative',
+                          }}
+                        >
+                          {/* Step Number Badge */}
+                          <div
+                            style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '50%',
+                              background: isApproved
+                                ? 'var(--accent-emerald)'
+                                : isRejected
+                                ? 'var(--accent-rose)'
+                                : isCurrentActionable
+                                ? 'var(--primary)'
+                                : 'rgba(255, 255, 255, 0.1)',
+                              color: 'white',
+                              fontWeight: 800,
+                              fontSize: '0.8rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {isApproved ? (
+                              <Check size={16} />
+                            ) : isRejected ? (
+                              <X size={16} />
+                            ) : isSkipped ? (
+                              '—'
+                            ) : (
+                              step.orderIndex
+                            )}
+                          </div>
+
+                          {/* Step Info */}
+                          <div style={{ flex: 1 }}>
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                flexWrap: 'wrap',
+                                gap: '0.5rem',
+                              }}
+                            >
+                              <div style={{ fontWeight: 700, color: 'white', fontSize: '0.9rem' }}>
+                                Cấp {step.orderIndex}: {step.stepName}
+                              </div>
+                              <span
+                                style={{
+                                  fontSize: '0.72rem',
+                                  fontWeight: 700,
+                                  textTransform: 'uppercase',
+                                  padding: '0.2rem 0.55rem',
+                                  borderRadius: '10px',
+                                  background: isApproved
+                                    ? 'rgba(16, 185, 129, 0.15)'
+                                    : isRejected
+                                    ? 'rgba(244, 63, 94, 0.15)'
+                                    : isSkipped
+                                    ? 'rgba(148, 163, 184, 0.15)'
+                                    : 'rgba(245, 158, 11, 0.15)',
+                                  color: isApproved
+                                    ? '#6ee7b7'
+                                    : isRejected
+                                    ? '#fca5a5'
+                                    : isSkipped
+                                    ? '#cbd5e1'
+                                    : '#fde68a',
+                                  border: '1px solid',
+                                  borderColor: isApproved
+                                    ? 'rgba(16, 185, 129, 0.3)'
+                                    : isRejected
+                                    ? 'rgba(244, 63, 94, 0.3)'
+                                    : isSkipped
+                                    ? 'rgba(148, 163, 184, 0.3)'
+                                    : 'rgba(245, 158, 11, 0.3)',
+                                }}
+                              >
+                                {isApproved
+                                  ? 'Đã Phê Duyệt'
+                                  : isRejected
+                                  ? 'Đã Từ Chối'
+                                  : isSkipped
+                                  ? 'Đã Bỏ Qua'
+                                  : 'Đang Chờ Duyệt'}
+                              </span>
+                            </div>
+
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.3rem' }}>
+                              {step.reviewedByName ? (
+                                <span>
+                                  Thực hiện bởi: <strong style={{ color: 'white' }}>{step.reviewedByName}</strong>
+                                  {step.reviewedAt && ` • ${formatDate(step.reviewedAt)}`}
+                                </span>
+                              ) : (
+                                <span>
+                                  Thẩm quyền:{' '}
+                                  {step.stepType === 1
+                                    ? 'Trưởng phòng ban biểu mẫu'
+                                    : step.stepType === 3
+                                    ? 'Chủ sở hữu công ty'
+                                    : step.stepType === 2
+                                    ? step.specificApproverUserName || 'Nhân sự được chỉ định'
+                                    : 'Theo vai trò thành viên'}
+                                </span>
+                              )}
+                            </div>
+
+                            {step.reviewNotes && (
+                              <div
+                                style={{
+                                  marginTop: '0.5rem',
+                                  padding: '0.5rem 0.75rem',
+                                  background: 'rgba(0, 0, 0, 0.25)',
+                                  borderRadius: 'var(--radius-sm)',
+                                  borderLeft: isApproved
+                                    ? '3px solid var(--accent-emerald)'
+                                    : '3px solid var(--accent-rose)',
+                                  fontSize: '0.8rem',
+                                  color: 'var(--text-primary)',
+                                  fontStyle: 'italic',
+                                }}
+                              >
+                                "{step.reviewNotes}"
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
                   )}
 
-                  <button
-                    className="btn btn-sm"
-                    onClick={() => handleProcessReview(2)}
-                    disabled={isSubmittingReview}
-                    style={{
-                      background: 'rgba(244, 63, 94, 0.15)',
-                      border: '1px solid rgba(244, 63, 94, 0.4)',
-                      color: '#f87171',
-                    }}
-                  >
-                    <XCircle size={15} /> Từ Chối Bài Nộp
-                  </button>
+                  {/* Action box for current pending step */}
+                  {timeline.some((s) => s.status === 0) && (
+                    <div
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.03)',
+                        border: '1px solid var(--border-hover)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '1.25rem',
+                      }}
+                    >
+                      {(() => {
+                        const currentStep = timeline.find((s) => s.status === 0)!
+                        return (
+                          <>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                              <UserCheck size={16} color="var(--primary-light)" />
+                              <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'white', margin: 0 }}>
+                                Thẩm Định Cấp Độ Này: Bước {currentStep.orderIndex} ({currentStep.stepName})
+                              </h4>
+                            </div>
 
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={() => handleProcessReview(1)}
-                    disabled={isSubmittingReview}
-                    style={{
-                      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                      boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
-                    }}
-                  >
-                    <CheckCircle size={15} /> Phê Duyệt Bài Nộp
-                  </button>
+                            <div style={{ marginBottom: '1rem' }}>
+                              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
+                                Ý kiến phản hồi / Lý do cho bước này
+                              </label>
+                              <textarea
+                                className="input-field"
+                                rows={2}
+                                placeholder="Ghi chú thẩm định của cấp này (ví dụ: Đồng ý chuyển tiếp cho bước sau...)"
+                                value={reviewNote}
+                                onChange={(e) => setReviewNote(e.target.value)}
+                                style={{ width: '100%', resize: 'vertical' }}
+                              />
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                              <button
+                                className="btn btn-sm"
+                                onClick={() => handleProcessStepReview(currentStep.orderIndex, 2)}
+                                disabled={isSubmittingReview}
+                                style={{
+                                  background: 'rgba(244, 63, 94, 0.15)',
+                                  border: '1px solid rgba(244, 63, 94, 0.4)',
+                                  color: '#f87171',
+                                }}
+                              >
+                                <XCircle size={15} /> Từ Chối Bước Này
+                              </button>
+
+                              <button
+                                className="btn btn-primary btn-sm"
+                                onClick={() => handleProcessStepReview(currentStep.orderIndex, 1)}
+                                disabled={isSubmittingReview}
+                                style={{
+                                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                  boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
+                                }}
+                              >
+                                <CheckCircle size={15} /> Duyệt Bước {currentStep.orderIndex}
+                              </button>
+                            </div>
+                          </>
+                        )
+                      })()}
+                    </div>
+                  )}
                 </div>
-              </div>
+              ) : (
+                /* Single-step Review Fallback */
+                <div
+                  style={{
+                    borderTop: '1px solid var(--border-subtle)',
+                    paddingTop: '1.25rem',
+                    marginTop: '1.25rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                    <MessageSquare size={16} color="var(--primary-light)" />
+                    <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'white' }}>
+                      Quyết Định Thẩm Định (1 Cấp)
+                    </h4>
+                  </div>
+
+                  <div style={{ marginBottom: '1rem' }}>
+                    <label
+                      style={{
+                        display: 'block',
+                        fontSize: '0.8rem',
+                        color: 'var(--text-secondary)',
+                        marginBottom: '0.4rem',
+                      }}
+                    >
+                      Ý kiến phê duyệt / Lý do từ chối (Ghi chú phản hồi cho người nộp)
+                    </label>
+                    <textarea
+                      className="input-field"
+                      rows={3}
+                      placeholder="Nhập ghi chú phản hồi (ví dụ: Đồng ý cấp thiết bị, hoặc Vui lòng chỉnh sửa ngân sách...)"
+                      value={reviewNote}
+                      onChange={(e) => setReviewNote(e.target.value)}
+                      style={{ width: '100%', resize: 'vertical' }}
+                    />
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                    {activeReviewSubmission.status !== 0 && (
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleProcessReview(0)}
+                        disabled={isSubmittingReview}
+                        title="Chuyển lại về trạng thái chờ xử lý"
+                      >
+                        <Clock size={14} /> Chuyển về Chờ Duyệt
+                      </button>
+                    )}
+
+                    <button
+                      className="btn btn-sm"
+                      onClick={() => handleProcessReview(2)}
+                      disabled={isSubmittingReview}
+                      style={{
+                        background: 'rgba(244, 63, 94, 0.15)',
+                        border: '1px solid rgba(244, 63, 94, 0.4)',
+                        color: '#f87171',
+                      }}
+                    >
+                      <XCircle size={15} /> Từ Chối Bài Nộp
+                    </button>
+
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => handleProcessReview(1)}
+                      disabled={isSubmittingReview}
+                      style={{
+                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
+                      }}
+                    >
+                      <CheckCircle size={15} /> Phê Duyệt Bài Nộp
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Modal Footer */}

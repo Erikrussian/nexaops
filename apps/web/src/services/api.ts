@@ -21,6 +21,11 @@ import type {
   AcceptInviteResponse,
   UpdateMemberRequest,
   UserSession,
+  ApprovalWorkflow,
+  SubmissionApprovalStep,
+  CreateOrUpdateWorkflowRequest,
+  StepApprovalActionRequest,
+  NotificationListResponse,
 } from '../types'
 
 const BASE_URL = '' // Uses Vite proxy config
@@ -414,6 +419,99 @@ class ApiClient {
     if (filter?.toDate) params.set('toDate', filter.toDate)
     const qs = params.toString() ? `?${params.toString()}` : ''
     return this.request<PagedResult<AuditLog>>(`/companies/${companyId}/audit-logs${qs}`)
+  }
+
+  // ==========================================
+  // MULTI-STEP APPROVAL WORKFLOW APIS
+  // ==========================================
+
+  async getApprovalWorkflow(companyId: string, formId: string): Promise<ApprovalWorkflow | null> {
+    try {
+      return await this.request<ApprovalWorkflow>(`/companies/${companyId}/forms/${formId}/workflow`)
+    } catch (err: any) {
+      if (err?.status === 404 || err?.message?.includes('404')) {
+        return null
+      }
+      throw err
+    }
+  }
+
+  async saveApprovalWorkflow(
+    companyId: string,
+    formId: string,
+    data: CreateOrUpdateWorkflowRequest
+  ): Promise<ApprovalWorkflow> {
+    return this.request<ApprovalWorkflow>(`/companies/${companyId}/forms/${formId}/workflow`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteApprovalWorkflow(companyId: string, formId: string): Promise<void> {
+    return this.request<void>(`/companies/${companyId}/forms/${formId}/workflow`, {
+      method: 'DELETE',
+    })
+  }
+
+  async getSubmissionWorkflowTimeline(
+    companyId: string,
+    submissionId: string
+  ): Promise<SubmissionApprovalStep[]> {
+    return this.request<SubmissionApprovalStep[]>(
+      `/companies/${companyId}/submissions/${submissionId}/workflow-timeline`
+    )
+  }
+
+  async processStepApproval(
+    companyId: string,
+    submissionId: string,
+    order: number,
+    data: StepApprovalActionRequest
+  ): Promise<FormSubmission> {
+    return this.request<FormSubmission>(
+      `/companies/${companyId}/submissions/${submissionId}/steps/${order}/process`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    )
+  }
+
+  // ==========================================
+  // NOTIFICATION CENTER APIS
+  // ==========================================
+
+  async getNotifications(
+    companyId: string,
+    isRead?: boolean,
+    page: number = 1,
+    pageSize: number = 20
+  ): Promise<NotificationListResponse> {
+    const params = new URLSearchParams()
+    params.set('page', page.toString())
+    params.set('pageSize', pageSize.toString())
+    if (isRead !== undefined) {
+      params.set('isRead', isRead.toString())
+    }
+    return this.request<NotificationListResponse>(
+      `/companies/${companyId}/notifications?${params.toString()}`
+    )
+  }
+
+  async getUnreadNotificationCount(companyId: string): Promise<{ unreadCount: number }> {
+    return this.request<{ unreadCount: number }>(`/companies/${companyId}/notifications/unread-count`)
+  }
+
+  async markNotificationAsRead(id: string): Promise<void> {
+    return this.request<void>(`/notifications/${id}/read`, {
+      method: 'POST',
+    })
+  }
+
+  async markAllNotificationsAsRead(companyId: string): Promise<void> {
+    return this.request<void>(`/companies/${companyId}/notifications/read-all`, {
+      method: 'POST',
+    })
   }
 }
 

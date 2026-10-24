@@ -5,6 +5,7 @@ import { StatusBadge } from './StatusBadge'
 import { FormBuilderModal } from './FormBuilderModal'
 import { FormSubmissionModal } from './FormSubmissionModal'
 import { FormSubmissionsInbox } from './FormSubmissionsInbox'
+import { WorkflowConfigModal } from './WorkflowConfigModal'
 import {
   Plus,
   Search,
@@ -17,6 +18,7 @@ import {
   Archive,
   RefreshCw,
   Inbox,
+  GitMerge,
 } from 'lucide-react'
 
 // Pre-seeded initial forms showcasing diverse field types
@@ -105,6 +107,7 @@ export function FormsManager({ activeCompany }: FormsManagerProps) {
   const [isBuilderOpen, setIsBuilderOpen] = useState(false)
   const [testingForm, setTestingForm] = useState<FormDefinition | null>(null)
   const [schemaViewingForm, setSchemaViewingForm] = useState<FormDefinition | null>(null)
+  const [workflowConfigForm, setWorkflowConfigForm] = useState<FormDefinition | null>(null)
 
   // Fetch real forms when activeCompany changes
   useEffect(() => {
@@ -566,6 +569,19 @@ export function FormsManager({ activeCompany }: FormsManagerProps) {
                   >
                     <Code2 size={13} /> Schema
                   </button>
+
+                  {/* Configure Multi-step Workflow */}
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setWorkflowConfigForm(form)}
+                    title="Cấu hình quy trình phê duyệt nhiều cấp (Multi-step approval workflow)"
+                    style={{
+                      color: 'var(--accent-purple)',
+                      borderColor: 'rgba(168, 85, 247, 0.4)',
+                    }}
+                  >
+                    <GitMerge size={13} /> Quy Trình
+                  </button>
                 </div>
 
                 <div style={{ display: 'flex', gap: '0.35rem' }}>
@@ -657,6 +673,16 @@ export function FormsManager({ activeCompany }: FormsManagerProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Multi-step Approval Workflow Configuration Modal */}
+      {workflowConfigForm && (
+        <WorkflowConfigModal
+          form={workflowConfigForm}
+          companyId={activeCompany?.id || 'comp_01'}
+          isOpen={Boolean(workflowConfigForm)}
+          onClose={() => setWorkflowConfigForm(null)}
+        />
       )}
     </div>
   )
