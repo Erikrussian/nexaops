@@ -9,10 +9,14 @@ namespace NexaOps.Application.Notifications.Services;
 public class NotificationService : INotificationService
 {
     private readonly IApplicationDbContext _context;
+    private readonly IRealtimeNotificationService? _realtimeService;
 
-    public NotificationService(IApplicationDbContext context)
+    public NotificationService(
+        IApplicationDbContext context,
+        IRealtimeNotificationService? realtimeService = null)
     {
         _context = context;
+        _realtimeService = realtimeService;
     }
 
     public async Task<NotificationListResponse> GetUserNotificationsAsync(
@@ -150,7 +154,7 @@ public class NotificationService : INotificationService
         _context.Notifications.Add(notification);
         await _context.SaveChangesAsync(cancellationToken);
 
-        return new NotificationDto
+        var resultDto = new NotificationDto
         {
             Id = notification.Id,
             UserId = notification.UserId,
@@ -163,5 +167,12 @@ public class NotificationService : INotificationService
             ReadAt = notification.ReadAt,
             CreatedAt = notification.CreatedAt
         };
+
+        if (_realtimeService != null)
+        {
+            await _realtimeService.SendNotificationToUserAsync(notification.UserId, resultDto, cancellationToken);
+        }
+
+        return resultDto;
     }
 }

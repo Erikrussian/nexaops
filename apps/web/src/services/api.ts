@@ -488,18 +488,21 @@ class ApiClient {
     pageSize: number = 20
   ): Promise<NotificationListResponse> {
     const params = new URLSearchParams()
+    params.set('companyId', companyId)
     params.set('page', page.toString())
     params.set('pageSize', pageSize.toString())
     if (isRead !== undefined) {
-      params.set('isRead', isRead.toString())
+      params.set('unreadOnly', (!isRead).toString())
     }
     return this.request<NotificationListResponse>(
-      `/companies/${companyId}/notifications?${params.toString()}`
+      `/notifications?${params.toString()}`
     )
   }
 
   async getUnreadNotificationCount(companyId: string): Promise<{ unreadCount: number }> {
-    return this.request<{ unreadCount: number }>(`/companies/${companyId}/notifications/unread-count`)
+    const res = await this.request<any>(`/notifications/unread-count?companyId=${companyId}`)
+    const unreadCount = typeof res === 'number' ? res : res?.unreadCount ?? 0
+    return { unreadCount }
   }
 
   async markNotificationAsRead(id: string): Promise<void> {
@@ -509,7 +512,7 @@ class ApiClient {
   }
 
   async markAllNotificationsAsRead(companyId: string): Promise<void> {
-    return this.request<void>(`/companies/${companyId}/notifications/read-all`, {
+    return this.request<void>(`/notifications/read-all?companyId=${companyId}`, {
       method: 'POST',
     })
   }

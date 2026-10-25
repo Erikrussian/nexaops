@@ -17,19 +17,22 @@ public class ApprovalWorkflowService : IApprovalWorkflowService
     private readonly ICurrentUserService _currentUserService;
     private readonly IAuditLogService _auditLogService;
     private readonly INotificationService _notificationService;
+    private readonly IRealtimeNotificationService? _realtimeNotificationService;
 
     public ApprovalWorkflowService(
         IApplicationDbContext context,
         ICompanyAccessService companyAccessService,
         ICurrentUserService currentUserService,
         IAuditLogService auditLogService,
-        INotificationService notificationService)
+        INotificationService notificationService,
+        IRealtimeNotificationService? realtimeNotificationService = null)
     {
         _context = context;
         _companyAccessService = companyAccessService;
         _currentUserService = currentUserService;
         _auditLogService = auditLogService;
         _notificationService = notificationService;
+        _realtimeNotificationService = realtimeNotificationService;
     }
 
     public async Task<ApprovalWorkflowDto?> GetWorkflowByFormAsync(Guid companyId, Guid formId, CancellationToken cancellationToken = default)
@@ -380,6 +383,15 @@ public class ApprovalWorkflowService : IApprovalWorkflowService
             entityId: submission.Id.ToString(),
             details: new { StepOrder = stepOrder, StepName = step.StepName, Status = step.Status.ToString(), Notes = step.ReviewNotes },
             cancellationToken: cancellationToken);
+
+        if (_realtimeNotificationService != null)
+        {
+            await _realtimeNotificationService.BroadcastWorkflowEventAsync(
+                companyId,
+                "WorkflowStepUpdated",
+                new { submissionId = submission.Id, stepOrder = stepOrder, status = (int)step.Status },
+                cancellationToken);
+        }
 
         return MapStepToDto(step);
     }

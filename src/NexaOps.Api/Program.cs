@@ -5,11 +5,19 @@ using NexaOps.Application;
 using NexaOps.Infrastructure;
 using NexaOps.Infrastructure.Persistence;
 
+using NexaOps.Api.Hubs;
+using NexaOps.Api.Services;
+using NexaOps.Application.Notifications.Services;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Register Application & Infrastructure Services
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+
+// 1.1 Register SignalR and Realtime Services
+builder.Services.AddSignalR();
+builder.Services.AddScoped<IRealtimeNotificationService, RealtimeNotificationService>();
 
 // 2. Register Controllers & JSON Options
 builder.Services.AddControllers()
@@ -101,6 +109,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<NotificationHub>("/hubs/notifications");
 app.MapHealthChecks("/health");
 
 app.Run();

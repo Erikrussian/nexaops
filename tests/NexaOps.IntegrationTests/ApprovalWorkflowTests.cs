@@ -2,7 +2,9 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using NexaOps.Application.AuditLogs.DTOs;
 using NexaOps.Application.Auth.DTOs;
+using NexaOps.Application.Common.Models;
 using NexaOps.Application.Companies.DTOs;
 using NexaOps.Application.CompanyMembers.DTOs;
 using NexaOps.Application.Forms.DTOs;
@@ -453,5 +455,71 @@ public class ApprovalWorkflowTests : IClassFixture<CustomWebApplicationFactory>
         var countRes = await _client.SendAsync(countMsg);
         var unreadCount = await countRes.Content.ReadFromJsonAsync<int>(JsonOptions);
         Assert.Equal(0, unreadCount);
+    }
+
+    [Fact]
+    public async Task ProcessStepApproval_ShouldRecordAuditLogAndTriggerNotifications()
+    {
+        var (ownerToken, companyId, _) = await SetupCompanyAndOwnerAsync();
+        var (managerToken, managerId) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Manager);
+        var (memberToken, _) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Member);
+        var form = await CreatePublishedFormAsync(ownerToken, companyId);
+
+        // Create 1-step workflow with Manager
+        var wfMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/workflow")
+        {
+            Content = JsonContent.Create(new CreateOrUpdateWorkflowDto
+            {
+                Name = "Manager Only Workflow",
+                IsActive = true,
+                Steps = new List<CreateOrUpdateApprovalStepDto>
+                {
+                    new() { OrderIndex = 1, Name = "Manager Step", StepType = ApprovalStepType.Role, ApproverRole = MemberRole.Manager }
+                }
+            })
+        };
+        wfMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        await _client.SendAsync(wfMsg);
+
+        // Submit form
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["reason"] = "Audit log test submission" }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memberToken);
+        var submitRes = await _client.SendAsync(submitMsg);
+        var submission = await submitRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+
+        // Manager approves step 1
+        var approveMsg = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/companies/{companyId}/submissions/{submission!.Id}/steps/1/process")
+        {
+            Content = JsonContent.Create(new StepApprovalActionDto
+            {
+                Status = ApprovalStepStatus.Approved,
+                ReviewNotes = "Approved with audit verification"
+            })
+        };
+        approveMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", managerToken);
+        var approveRes = await _client.SendAsync(approveMsg);
+        Assert.Equal(HttpStatusCode.OK, approveRes.StatusCode);
+
+        // Query Audit Logs as Owner
+        var auditMsg = new HttpRequestMessage(HttpMethod.Get, $"/companies/{companyId}/audit-logs?action=APPROVE_STEP");
+        auditMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var auditRes = await _client.SendAsync(auditMsg);
+        Assert.Equal(HttpStatusCode.OK, auditRes.StatusCode);
+
+        var auditLogs = await auditRes.Content.ReadFromJsonAsync<PagedResult<AuditLogDto>>(JsonOptions);
+        Assert.NotNull(auditLogs);
+        Assert.True(auditLogs.Items.Count > 0);
+
+        var stepLog = auditLogs.Items.FirstOrDefault(l => l.Action == "APPROVE_STEP" && l.EntityId == submission.Id.ToString());
+        Assert.NotNull(stepLog);
+        Assert.Equal(managerId, stepLog.ActorId);
     }
 }

@@ -23,6 +23,15 @@ export default defineConfig({
         target: 'http://localhost:5066',
         changeOrigin: true,
       },
+      '/notifications': {
+        target: 'http://localhost:5066',
+        changeOrigin: true,
+      },
+      '/hubs': {
+        target: 'http://localhost:5066',
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
 })

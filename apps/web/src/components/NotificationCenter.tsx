@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { api } from '../services/api'
+import { signalRService } from '../services/signalr'
 import type { AppNotification } from '../types'
 import {
   Bell,
@@ -64,6 +65,23 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
     fetchUnreadCount()
     const interval = setInterval(fetchUnreadCount, 30000)
     return () => clearInterval(interval)
+  }, [companyId])
+
+  // SignalR real-time notification receiver
+  useEffect(() => {
+    signalRService.startConnection()
+    if (companyId) {
+      signalRService.joinCompany(companyId)
+    }
+
+    const unsubscribe = signalRService.onNotification((newNotif) => {
+      setNotifications((prev) => [newNotif, ...prev])
+      setUnreadCount((c) => c + 1)
+    })
+
+    return () => {
+      unsubscribe()
+    }
   }, [companyId])
 
   useEffect(() => {

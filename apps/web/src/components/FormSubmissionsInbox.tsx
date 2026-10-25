@@ -8,6 +8,7 @@ import type {
   ApprovalStepStatus,
 } from '../types'
 import { api } from '../services/api'
+import { signalRService } from '../services/signalr'
 import { StatusBadge } from './StatusBadge'
 import {
   Inbox,
@@ -241,6 +242,20 @@ export function FormSubmissionsInbox({
       }
     }
   }
+
+  // Live real-time update when other approvers process a step
+  useEffect(() => {
+    const unsub = signalRService.onWorkflowEvent((payload: any) => {
+      if (activeReviewSubmission && activeCompany?.id && payload?.submissionId === activeReviewSubmission.id) {
+        api.getSubmissionWorkflowTimeline(activeCompany.id, activeReviewSubmission.id)
+          .then((steps) => {
+            if (steps && steps.length > 0) setTimeline(steps)
+          })
+          .catch(() => {})
+      }
+    })
+    return () => unsub()
+  }, [activeReviewSubmission, activeCompany?.id])
 
   // Handle Multi-step Workflow Step Approval Action
   const handleProcessStepReview = async (order: number, stepStatus: ApprovalStepStatus) => {
