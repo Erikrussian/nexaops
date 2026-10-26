@@ -4,8 +4,10 @@ import type {
   FormDefinition,
   SubmissionStatus,
   Company,
+  CompanyMember,
   SubmissionApprovalStep,
   ApprovalStepStatus,
+  WorkflowAnalytics,
 } from '../types'
 import { api } from '../services/api'
 import { signalRService } from '../services/signalr'
@@ -27,6 +29,9 @@ import {
   GitMerge,
   AlertTriangle,
   UserCheck,
+  Share2,
+  BarChart3,
+  TrendingUp,
 } from 'lucide-react'
 
 // Initial realistic pre-seeded submissions for instant showcase & test workflows
@@ -149,6 +154,19 @@ export function FormSubmissionsInbox({
   const [isLoadingTimeline, setIsLoadingTimeline] = useState(false)
   const [stepReviewError, setStepReviewError] = useState<string | null>(null)
 
+  // Step delegation state
+  const [companyMembers, setCompanyMembers] = useState<CompanyMember[]>([])
+  const [isDelegating, setIsDelegating] = useState(false)
+  const [delegateUserId, setDelegateUserId] = useState('')
+  const [delegateReason, setDelegateReason] = useState('')
+  const [isSubmittingDelegation, setIsSubmittingDelegation] = useState(false)
+
+  // Workflow SLA analytics modal state
+  const [showAnalyticsModal, setShowAnalyticsModal] = useState(false)
+  const [workflowAnalytics, setWorkflowAnalytics] = useState<WorkflowAnalytics | null>(null)
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false)
+  const [analyticsFormTitle, setAnalyticsFormTitle] = useState('')
+
   // Sync preselectedFormId when changed from parent
   useEffect(() => {
     if (preselectedFormId) {
@@ -221,6 +239,9 @@ export function FormSubmissionsInbox({
     setShowJsonInspector(false)
     setActionSuccessMsg(null)
     setStepReviewError(null)
+    setIsDelegating(false)
+    setDelegateUserId('')
+    setDelegateReason('')
 
     if (submission.approvalSteps && submission.approvalSteps.length > 0) {
       setTimeline(submission.approvalSteps)
@@ -229,6 +250,7 @@ export function FormSubmissionsInbox({
     }
 
     if (activeCompany?.id) {
+      api.getCompanyMembers(activeCompany.id).then(setCompanyMembers).catch(() => setCompanyMembers([]))
       setIsLoadingTimeline(true)
       try {
         const steps = await api.getSubmissionWorkflowTimeline(activeCompany.id, submission.id)
@@ -294,6 +316,67 @@ export function FormSubmissionsInbox({
       setStepReviewError(err.message || 'Lỗi khi xử lý phê duyệt bước')
     } finally {
       setIsSubmittingReview(false)
+    }
+  }
+
+  // Handle Step Delegation
+  const handleDelegateStep = async (order: number) => {
+    if (!activeReviewSubmission || !activeCompany?.id) return
+    if (!delegateUserId) {
+      setStepReviewError('Vui lòng chọn nhân sự để ủy quyền phê duyệt')
+      return
+    }
+
+    setIsSubmittingDelegation(true)
+    setStepReviewError(null)
+    setActionSuccessMsg(null)
+
+    try {
+      await api.delegateStepApproval(
+        activeCompany.id,
+        activeReviewSubmission.id,
+        order,
+        {
+          newApproverUserId: delegateUserId,
+          reason: delegateReason.trim() || undefined,
+        }
+      )
+
+      const refreshedSteps = await api.getSubmissionWorkflowTimeline(
+        activeCompany.id,
+        activeReviewSubmission.id
+      )
+      setTimeline(refreshedSteps)
+
+      const targetMember = companyMembers.find((m) => m.userId === delegateUserId)
+      const targetName = targetMember?.userName || targetMember?.email || 'thành viên được chọn'
+
+      setActionSuccessMsg(`Đã ủy quyền thẩm định Bước ${order} cho ${targetName} thành công.`)
+      setIsDelegating(false)
+      setDelegateUserId('')
+      setDelegateReason('')
+    } catch (err: any) {
+      setStepReviewError(err.message || 'Lỗi khi ủy quyền bước')
+    } finally {
+      setIsSubmittingDelegation(false)
+    }
+  }
+
+  // Open Workflow SLA Analytics Modal
+  const handleOpenAnalytics = async (formId: string) => {
+    if (!activeCompany?.id) return
+    const matchedForm = forms.find((f) => f.id === formId)
+    setAnalyticsFormTitle(matchedForm?.title || 'Biểu mẫu')
+    setShowAnalyticsModal(true)
+    setIsLoadingAnalytics(true)
+    try {
+      const data = await api.getWorkflowAnalytics(activeCompany.id, formId)
+      setWorkflowAnalytics(data)
+    } catch (err: any) {
+      console.warn('Could not load workflow analytics:', err.message)
+      setWorkflowAnalytics(null)
+    } finally {
+      setIsLoadingAnalytics(false)
     }
   }
 
@@ -559,6 +642,19 @@ export function FormSubmissionsInbox({
           >
             <XCircle size={13} /> Từ chối ({metrics.rejected})
           </button>
+          {selectedFormFilter !== 'ALL' && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => handleOpenAnalytics(selectedFormFilter)}
+              title="Phân tích SLA & Hiệu suất Workflow của biểu mẫu"
+              style={{
+                borderColor: 'rgba(6, 182, 212, 0.4)',
+                color: 'var(--accent-cyan)',
+              }}
+            >
+              <BarChart3 size={13} /> Phân tích SLA
+            </button>
+          )}
           <button
             className="btn btn-secondary btn-sm"
             onClick={fetchSubmissions}
@@ -1136,11 +1232,23 @@ export function FormSubmissionsInbox({
                               />
                             </div>
 
-                            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => setIsDelegating(!isDelegating)}
+                                disabled={isSubmittingReview || isSubmittingDelegation}
+                                style={{
+                                  borderColor: isDelegating ? 'var(--accent-purple)' : undefined,
+                                  color: isDelegating ? 'var(--accent-purple)' : undefined,
+                                }}
+                              >
+                                <Share2 size={15} /> {isDelegating ? 'Đóng Ủy Quyền' : 'Ủy Quyền Bước Này'}
+                              </button>
+
                               <button
                                 className="btn btn-sm"
                                 onClick={() => handleProcessStepReview(currentStep.orderIndex, 2)}
-                                disabled={isSubmittingReview}
+                                disabled={isSubmittingReview || isSubmittingDelegation}
                                 style={{
                                   background: 'rgba(244, 63, 94, 0.15)',
                                   border: '1px solid rgba(244, 63, 94, 0.4)',
@@ -1153,7 +1261,7 @@ export function FormSubmissionsInbox({
                               <button
                                 className="btn btn-primary btn-sm"
                                 onClick={() => handleProcessStepReview(currentStep.orderIndex, 1)}
-                                disabled={isSubmittingReview}
+                                disabled={isSubmittingReview || isSubmittingDelegation}
                                 style={{
                                   background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                                   boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
@@ -1162,6 +1270,110 @@ export function FormSubmissionsInbox({
                                 <CheckCircle size={15} /> Duyệt Bước {currentStep.orderIndex}
                               </button>
                             </div>
+
+                            {/* Delegation Inline Form */}
+                            {isDelegating && (
+                              <div
+                                style={{
+                                  marginTop: '1rem',
+                                  padding: '1rem',
+                                  borderRadius: 'var(--radius-md)',
+                                  background: 'rgba(168, 85, 247, 0.08)',
+                                  border: '1px solid rgba(168, 85, 247, 0.3)',
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                                  <Share2 size={15} color="var(--accent-purple)" />
+                                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>
+                                    Chuyển Giao Quyền Thẩm Định Cho Nhân Sự Khác
+                                  </div>
+                                </div>
+
+                                <div
+                                  style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                                    gap: '0.75rem',
+                                    marginBottom: '0.75rem',
+                                  }}
+                                >
+                                  <div>
+                                    <label
+                                      style={{
+                                        display: 'block',
+                                        fontSize: '0.75rem',
+                                        color: 'var(--text-secondary)',
+                                        marginBottom: '0.3rem',
+                                      }}
+                                    >
+                                      Chọn thành viên tiếp nhận ủy quyền *
+                                    </label>
+                                    <select
+                                      className="input-field"
+                                      value={delegateUserId}
+                                      onChange={(e) => setDelegateUserId(e.target.value)}
+                                      style={{ width: '100%', fontSize: '0.85rem' }}
+                                    >
+                                      <option value="">-- Chọn thành viên nhận ủy quyền --</option>
+                                      {companyMembers
+                                        .filter((m) => {
+                                          if (!m.userId) return false
+                                          if (!currentStep.allowSelfApproval && m.userId === activeReviewSubmission.submittedById)
+                                            return false
+                                          return true
+                                        })
+                                        .map((m) => (
+                                          <option key={m.id} value={m.userId || ''}>
+                                            {m.userName || m.email} ({m.role || 'Member'})
+                                          </option>
+                                        ))}
+                                    </select>
+                                  </div>
+
+                                  <div>
+                                    <label
+                                      style={{
+                                        display: 'block',
+                                        fontSize: '0.75rem',
+                                        color: 'var(--text-secondary)',
+                                        marginBottom: '0.3rem',
+                                      }}
+                                    >
+                                      Lý do bàn giao / ủy quyền
+                                    </label>
+                                    <input
+                                      type="text"
+                                      className="input-field"
+                                      placeholder="Ví dụ: Nghỉ phép, công tác, phân công chuyên môn..."
+                                      value={delegateReason}
+                                      onChange={(e) => setDelegateReason(e.target.value)}
+                                      style={{ width: '100%', fontSize: '0.85rem' }}
+                                    />
+                                  </div>
+                                </div>
+
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                                  <button
+                                    className="btn btn-sm btn-secondary"
+                                    onClick={() => setIsDelegating(false)}
+                                    disabled={isSubmittingDelegation}
+                                  >
+                                    Hủy
+                                  </button>
+                                  <button
+                                    className="btn btn-sm btn-primary"
+                                    onClick={() => handleDelegateStep(currentStep.orderIndex)}
+                                    disabled={!delegateUserId || isSubmittingDelegation}
+                                    style={{
+                                      background: 'linear-gradient(135deg, #a855f7 0%, #7c3aed 100%)',
+                                      borderColor: '#9333ea',
+                                    }}
+                                  >
+                                    {isSubmittingDelegation ? 'Đang chuyển giao...' : 'Xác Nhận Chuyển Giao Quyền'}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </>
                         )
                       })()}
@@ -1256,6 +1468,217 @@ export function FormSubmissionsInbox({
           </div>
         </div>
       )}
+
+      {/* WORKFLOW SLA ANALYTICS MODAL */}
+      {showAnalyticsModal && (
+        <div className="modal-overlay" onClick={() => setShowAnalyticsModal(false)}>
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '780px', width: '92%' }}
+          >
+            {/* Modal Header */}
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'rgba(6, 182, 212, 0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <BarChart3 size={20} color="var(--accent-cyan)" />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'white', margin: 0 }}>
+                    Hiệu Suất Quy Trình & SLA Phê Duyệt
+                  </h3>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    Biểu mẫu: <strong style={{ color: 'white' }}>{analyticsFormTitle}</strong>
+                  </div>
+                </div>
+              </div>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowAnalyticsModal(false)}
+                style={{ padding: '0.4rem' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="modal-body" style={{ maxHeight: '72vh', overflowY: 'auto' }}>
+              {isLoadingAnalytics ? (
+                <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <RefreshCw size={24} className="spin" style={{ margin: '0 auto 0.75rem' }} />
+                  <div>Đang tải số liệu phân tích SLA...</div>
+                </div>
+              ) : !workflowAnalytics ? (
+                <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  Không có dữ liệu thống kê workflow cho biểu mẫu này.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  {/* KPI Summary Cards */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                      gap: '0.75rem',
+                    }}
+                  >
+                    <div
+                      style={{
+                        padding: '1rem',
+                        background: 'rgba(255, 255, 255, 0.03)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--border-subtle)',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Tổng bài nộp</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'white', marginTop: '0.2rem' }}>
+                        {workflowAnalytics.totalSubmissions}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        padding: '1rem',
+                        background: 'rgba(16, 185, 129, 0.06)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid rgba(16, 185, 129, 0.25)',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.72rem', color: '#6ee7b7' }}>Hoàn tất duyệt</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#34d399', marginTop: '0.2rem' }}>
+                        {workflowAnalytics.fullyApprovedCount}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        padding: '1rem',
+                        background: 'rgba(245, 158, 11, 0.06)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid rgba(245, 158, 11, 0.25)',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.72rem', color: '#fde68a' }}>Đang thẩm định</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#fbbf24', marginTop: '0.2rem' }}>
+                        {workflowAnalytics.inReviewCount}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        padding: '1rem',
+                        background: 'rgba(244, 63, 94, 0.06)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid rgba(244, 63, 94, 0.25)',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.72rem', color: '#fca5a5' }}>Bị từ chối</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#f87171', marginTop: '0.2rem' }}>
+                        {workflowAnalytics.rejectedCount}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        padding: '1rem',
+                        background: 'rgba(6, 182, 212, 0.08)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid rgba(6, 182, 212, 0.3)',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.72rem', color: '#67e8f9' }}>Turnaround SLA</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#22d3ee', marginTop: '0.2rem' }}>
+                        {workflowAnalytics.overallAverageTurnaroundHours}h
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Step SLA Breakdown */}
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                      <TrendingUp size={16} color="var(--accent-cyan)" />
+                      <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'white', margin: 0 }}>
+                        Chi Tiết Hiệu Suất Theo Từng Cấp Phê Duyệt
+                      </h4>
+                    </div>
+
+                    {workflowAnalytics.stepMetrics.length === 0 ? (
+                      <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        Chưa có dữ liệu xử lý theo bước cho quy trình này.
+                      </div>
+                    ) : (
+                      <div className="table-responsive" style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)' }}>
+                        <table className="data-table" style={{ margin: 0 }}>
+                          <thead>
+                            <tr>
+                              <th>Cấp độ</th>
+                              <th>Tên bước phê duyệt</th>
+                              <th>Đã thẩm định</th>
+                              <th>Đang chờ xử lý</th>
+                              <th style={{ textAlign: 'right' }}>Thời gian TB (Giờ)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {workflowAnalytics.stepMetrics.map((sm) => (
+                              <tr key={sm.orderIndex}>
+                                <td>
+                                  <span
+                                    style={{
+                                      padding: '0.2rem 0.5rem',
+                                      borderRadius: '6px',
+                                      background: 'rgba(255, 255, 255, 0.08)',
+                                      fontWeight: 700,
+                                      fontSize: '0.75rem',
+                                    }}
+                                  >
+                                    Cấp {sm.orderIndex}
+                                  </span>
+                                </td>
+                                <td style={{ fontWeight: 600, color: 'white' }}>{sm.stepName}</td>
+                                <td>
+                                  <span style={{ color: 'var(--accent-emerald)', fontWeight: 700 }}>
+                                    {sm.totalSubmissionsProcessed}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span style={{ color: sm.pendingCount > 0 ? 'var(--accent-amber)' : 'var(--text-muted)', fontWeight: 700 }}>
+                                    {sm.pendingCount}
+                                  </span>
+                                </td>
+                                <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                                  {sm.averageReviewTimeHours}h
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowAnalyticsModal(false)}>
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+

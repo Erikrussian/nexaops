@@ -355,3 +355,28 @@ export interface NotificationListResponse {
   pageSize: number
 }
 
+export interface DelegateStepRequest {
+  newApproverUserId: string
+  reason?: string
+}
+
+export interface WorkflowStepMetric {
+  orderIndex: number
+  stepName: string
+  totalSubmissionsProcessed: number
+  pendingCount: number
+  averageReviewTimeHours: number
+}
+
+export interface WorkflowAnalytics {
+  workflowId: string
+  workflowName: string
+  totalSubmissions: number
+  fullyApprovedCount: number
+  rejectedCount: number
+  inReviewCount: number
+  overallAverageTurnaroundHours: number
+  stepMetrics: WorkflowStepMetric[]
+}
+
+

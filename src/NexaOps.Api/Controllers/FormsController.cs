@@ -351,4 +351,40 @@ public class FormsController : ControllerBase
         var result = await _workflowService.ProcessStepApprovalAsync(companyId, submissionId, stepOrder, dto, cancellationToken);
         return Ok(result);
     }
+
+    /// <summary>
+    /// POST /companies/{companyId}/submissions/{submissionId}/steps/{stepOrder}/delegate - Ủy quyền phê duyệt bước cho thành viên khác
+    /// </summary>
+    [HttpPost("companies/{companyId:guid}/submissions/{submissionId:guid}/steps/{stepOrder:int}/delegate")]
+    [ProducesResponseType(typeof(SubmissionApprovalStepDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SubmissionApprovalStepDto>> DelegateStep(
+        [FromRoute] Guid companyId,
+        [FromRoute] Guid submissionId,
+        [FromRoute] int stepOrder,
+        [FromBody] DelegateStepDto dto,
+        CancellationToken cancellationToken)
+    {
+        var result = await _workflowService.DelegateStepAsync(companyId, submissionId, stepOrder, dto, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// GET /companies/{companyId}/forms/{formId}/workflow/analytics - Thống kê SLA và hiệu suất xử lý quy trình biểu mẫu
+    /// </summary>
+    [HttpGet("companies/{companyId:guid}/forms/{formId:guid}/workflow/analytics")]
+    [ProducesResponseType(typeof(WorkflowAnalyticsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<WorkflowAnalyticsDto>> GetWorkflowAnalytics(
+        [FromRoute] Guid companyId,
+        [FromRoute] Guid formId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _workflowService.GetWorkflowAnalyticsAsync(companyId, formId, cancellationToken);
+        return Ok(result);
+    }
 }
+

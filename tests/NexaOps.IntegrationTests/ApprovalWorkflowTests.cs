@@ -522,4 +522,115 @@ public class ApprovalWorkflowTests : IClassFixture<CustomWebApplicationFactory>
         Assert.NotNull(stepLog);
         Assert.Equal(managerId, stepLog.ActorId);
     }
+
+    [Fact]
+    public async Task ProcessStepApproval_Delegation_ShouldTransferAuthorityAndAllowNewApprover()
+    {
+        var (ownerToken, companyId, _) = await SetupCompanyAndOwnerAsync();
+        var (managerToken, managerId) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Manager);
+        var (adminToken, adminId) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Admin);
+        var (memberToken, memberId) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Member);
+        var form = await CreatePublishedFormAsync(ownerToken, companyId);
+
+        // Workflow: Step 1 (Manager Role)
+        var wfMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/workflow")
+        {
+            Content = JsonContent.Create(new CreateOrUpdateWorkflowDto
+            {
+                Name = "Delegation Flow Test",
+                IsActive = true,
+                Steps = new List<CreateOrUpdateApprovalStepDto>
+                {
+                    new() { OrderIndex = 1, Name = "Review Step", StepType = ApprovalStepType.Role, ApproverRole = MemberRole.Manager }
+                }
+            })
+        };
+        wfMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        await _client.SendAsync(wfMsg);
+
+        // Member submits form
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["reason"] = "Delegation test" }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memberToken);
+        var submitRes = await _client.SendAsync(submitMsg);
+        var submission = await submitRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+
+        // Manager tries to delegate step 1 to the submitter (Anti-fraud check: should fail with 400 Bad Request)
+        var fraudDelegateMsg = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/companies/{companyId}/submissions/{submission!.Id}/steps/1/delegate")
+        {
+            Content = JsonContent.Create(new DelegateStepDto
+            {
+                NewApproverUserId = memberId,
+                Reason = "Self-approval attempt"
+            })
+        };
+        fraudDelegateMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", managerToken);
+        var fraudRes = await _client.SendAsync(fraudDelegateMsg);
+        Assert.Equal(HttpStatusCode.BadRequest, fraudRes.StatusCode);
+
+        // Manager delegates step 1 to Admin
+        var validDelegateMsg = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/companies/{companyId}/submissions/{submission.Id}/steps/1/delegate")
+        {
+            Content = JsonContent.Create(new DelegateStepDto
+            {
+                NewApproverUserId = adminId,
+                Reason = "Bàn giao do nghỉ phép"
+            })
+        };
+        validDelegateMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", managerToken);
+        var validDelegateRes = await _client.SendAsync(validDelegateMsg);
+        Assert.Equal(HttpStatusCode.OK, validDelegateRes.StatusCode);
+
+        var delegatedStep = await validDelegateRes.Content.ReadFromJsonAsync<SubmissionApprovalStepDto>(JsonOptions);
+        Assert.NotNull(delegatedStep);
+        Assert.Equal(adminId, delegatedStep.SpecificApproverUserId);
+        Assert.Contains("Bàn giao do nghỉ phép", delegatedStep.ReviewNotes);
+
+        // Admin now approves the delegated step
+        var approveMsg = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/companies/{companyId}/submissions/{submission.Id}/steps/1/process")
+        {
+            Content = JsonContent.Create(new StepApprovalActionDto
+            {
+                Status = ApprovalStepStatus.Approved,
+                ReviewNotes = "Duyệt theo ủy quyền"
+            })
+        };
+        approveMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+        var approveRes = await _client.SendAsync(approveMsg);
+        Assert.Equal(HttpStatusCode.OK, approveRes.StatusCode);
+
+        // Verify final submission status is Approved
+        var getSubMsg = new HttpRequestMessage(HttpMethod.Get, $"/companies/{companyId}/submissions/{submission.Id}");
+        getSubMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var getSubRes = await _client.SendAsync(getSubMsg);
+        var finalSub = await getSubRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.Equal(SubmissionStatus.Approved, finalSub!.Status);
+
+        // Verify Workflow Analytics endpoint
+        var analyticsMsg = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/companies/{companyId}/forms/{form.Id}/workflow/analytics");
+        analyticsMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var analyticsRes = await _client.SendAsync(analyticsMsg);
+        Assert.Equal(HttpStatusCode.OK, analyticsRes.StatusCode);
+
+        var analytics = await analyticsRes.Content.ReadFromJsonAsync<WorkflowAnalyticsDto>(JsonOptions);
+        Assert.NotNull(analytics);
+        Assert.Equal(1, analytics.TotalSubmissions);
+        Assert.Equal(1, analytics.FullyApprovedCount);
+        Assert.Single(analytics.StepMetrics);
+        Assert.Equal(1, analytics.StepMetrics[0].TotalSubmissionsProcessed);
+    }
 }
+

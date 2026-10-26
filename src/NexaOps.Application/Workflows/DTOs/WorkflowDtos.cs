@@ -79,3 +79,30 @@ public class StepApprovalActionDto
     public ApprovalStepStatus Status { get; set; }
     public string? ReviewNotes { get; set; }
 }
+
+public class DelegateStepDto
+{
+    public Guid NewApproverUserId { get; set; }
+    public string? Reason { get; set; }
+}
+
+public class WorkflowStepMetricDto
+{
+    public int OrderIndex { get; set; }
+    public string StepName { get; set; } = string.Empty;
+    public int TotalSubmissionsProcessed { get; set; }
+    public int PendingCount { get; set; }
+    public double AverageReviewTimeHours { get; set; }
+}
+
+public class WorkflowAnalyticsDto
+{
+    public Guid WorkflowId { get; set; }
+    public string WorkflowName { get; set; } = string.Empty;
+    public int TotalSubmissions { get; set; }
+    public int FullyApprovedCount { get; set; }
+    public int RejectedCount { get; set; }
+    public int InReviewCount { get; set; }
+    public double OverallAverageTurnaroundHours { get; set; }
+    public List<WorkflowStepMetricDto> StepMetrics { get; set; } = new();
+}

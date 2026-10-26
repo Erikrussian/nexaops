@@ -25,6 +25,8 @@ import type {
   SubmissionApprovalStep,
   CreateOrUpdateWorkflowRequest,
   StepApprovalActionRequest,
+  DelegateStepRequest,
+  WorkflowAnalytics,
   NotificationListResponse,
 } from '../types'
 
@@ -474,6 +476,30 @@ class ApiClient {
         method: 'POST',
         body: JSON.stringify(data),
       }
+    )
+  }
+
+  async delegateStepApproval(
+    companyId: string,
+    submissionId: string,
+    order: number,
+    data: DelegateStepRequest
+  ): Promise<SubmissionApprovalStep> {
+    return this.request<SubmissionApprovalStep>(
+      `/companies/${companyId}/submissions/${submissionId}/steps/${order}/delegate`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    )
+  }
+
+  async getWorkflowAnalytics(
+    companyId: string,
+    formId: string
+  ): Promise<WorkflowAnalytics> {
+    return this.request<WorkflowAnalytics>(
+      `/companies/${companyId}/forms/${formId}/workflow/analytics`
     )
   }
 

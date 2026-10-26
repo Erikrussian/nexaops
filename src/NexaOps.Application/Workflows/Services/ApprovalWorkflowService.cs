@@ -521,6 +521,170 @@ public class ApprovalWorkflowService : IApprovalWorkflowService
         }
     }
 
+    public async Task<SubmissionApprovalStepDto> DelegateStepAsync(
+        Guid companyId,
+        Guid submissionId,
+        int stepOrder,
+        DelegateStepDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        await _companyAccessService.EnsureReadAccessAsync(companyId, cancellationToken);
+        var currentUserId = _currentUserService.UserId!.Value;
+
+        var submission = await _context.FormSubmissions
+            .Include(s => s.FormDefinition)
+            .Include(s => s.ApprovalSteps)
+                .ThenInclude(st => st.SpecificApproverUser)
+            .FirstOrDefaultAsync(s => s.Id == submissionId && s.CompanyId == companyId, cancellationToken);
+
+        if (submission == null)
+        {
+            throw new KeyNotFoundException($"Không tìm thấy bài nộp với ID: {submissionId}");
+        }
+
+        var step = submission.ApprovalSteps.FirstOrDefault(s => s.OrderIndex == stepOrder);
+        if (step == null)
+        {
+            throw new KeyNotFoundException($"Không tìm thấy bước duyệt thứ {stepOrder} trong bài nộp");
+        }
+
+        if (step.Status != ApprovalStepStatus.Pending)
+        {
+            throw new InvalidOperationException($"Chỉ có thể ủy quyền bước đang ở trạng thái Chờ duyệt. Bước hiện tại: {step.Status}");
+        }
+
+        // Authorize caller: Caller must be eligible reviewer OR Admin/Owner
+        var isOwner = await _companyAccessService.IsOwnerAsync(companyId, cancellationToken);
+        var userRole = await _companyAccessService.GetUserRoleInCompanyAsync(companyId, cancellationToken);
+        var isAdmin = userRole == MemberRole.Admin;
+
+        if (!isOwner && !isAdmin)
+        {
+            await VerifyReviewerEligibilityAsync(companyId, currentUserId, step, submission, cancellationToken);
+        }
+
+        // Verify new approver exists and is a member of the company
+        var targetMember = await _context.CompanyMembers
+            .Include(m => m.User)
+            .FirstOrDefaultAsync(m => m.CompanyId == companyId && m.UserId == dto.NewApproverUserId, cancellationToken);
+
+        if (targetMember == null)
+        {
+            throw new KeyNotFoundException("Nhân sự được ủy quyền không thuộc công ty này");
+        }
+
+        // Anti-fraud check: Cannot delegate to submitter unless self-approval is explicitly allowed
+        if (!step.AllowSelfApproval && targetMember.UserId == submission.SubmittedById)
+        {
+            throw new InvalidOperationException("Không thể ủy quyền duyệt cho chính người nộp hồ sơ do chính sách chống xung đột lợi ích");
+        }
+
+        var delegatorUser = await _context.Users.FindAsync(new object[] { currentUserId }, cancellationToken);
+        var delegatorName = delegatorUser?.Name ?? "Quản lý";
+
+        var oldApproverId = step.SpecificApproverUserId;
+        step.SpecificApproverUserId = dto.NewApproverUserId;
+        step.SpecificApproverUser = targetMember.User;
+        step.StepType = ApprovalStepType.SpecificUser;
+        step.ReviewNotes = $"[Ủy quyền từ {delegatorName}]: {dto.Reason ?? "Chuyển giao quyền duyệt"}";
+        step.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // Notify new approver
+        await _notificationService.CreateNotificationAsync(new CreateNotificationDto
+        {
+            UserId = dto.NewApproverUserId,
+            CompanyId = companyId,
+            Type = NotificationType.ApprovalRequired,
+            Title = "Bạn nhận được ủy quyền phê duyệt",
+            Message = $"{delegatorName} đã ủy quyền cho bạn phê duyệt bước '{step.StepName}' của hồ sơ '{submission.FormDefinition?.Title}'. Lý do: {dto.Reason ?? "Không có"}",
+            LinkUrl = $"/forms/submissions/{submission.Id}"
+        }, cancellationToken);
+
+        // Audit Log
+        await _auditLogService.LogAsync(
+            companyId: companyId,
+            actorId: currentUserId,
+            action: "DELEGATE_STEP",
+            entityType: "FormSubmission",
+            entityId: submission.Id.ToString(),
+            details: new { StepOrder = stepOrder, OldApprover = oldApproverId, NewApprover = dto.NewApproverUserId, Reason = dto.Reason },
+            cancellationToken: cancellationToken);
+
+        // Broadcast SignalR event
+        if (_realtimeNotificationService != null)
+        {
+            await _realtimeNotificationService.BroadcastWorkflowEventAsync(
+                companyId,
+                "WorkflowStepUpdated",
+                new { submissionId = submission.Id, stepOrder = stepOrder, status = (int)step.Status, delegatedTo = dto.NewApproverUserId },
+                cancellationToken);
+        }
+
+        return MapStepToDto(step);
+    }
+
+    public async Task<WorkflowAnalyticsDto> GetWorkflowAnalyticsAsync(
+        Guid companyId,
+        Guid formId,
+        CancellationToken cancellationToken = default)
+    {
+        await _companyAccessService.EnsureReadAccessAsync(companyId, cancellationToken);
+
+        var workflow = await _context.ApprovalWorkflows
+            .Include(w => w.Steps)
+            .FirstOrDefaultAsync(w => w.CompanyId == companyId && w.FormDefinitionId == formId, cancellationToken);
+
+        var submissions = await _context.FormSubmissions
+            .Include(s => s.ApprovalSteps)
+            .Where(s => s.CompanyId == companyId && s.FormDefinitionId == formId)
+            .ToListAsync(cancellationToken);
+
+        var result = new WorkflowAnalyticsDto
+        {
+            WorkflowId = workflow?.Id ?? Guid.Empty,
+            WorkflowName = workflow?.Name ?? "Mặc định (1 Bước)",
+            TotalSubmissions = submissions.Count,
+            FullyApprovedCount = submissions.Count(s => s.Status == SubmissionStatus.Approved),
+            RejectedCount = submissions.Count(s => s.Status == SubmissionStatus.Rejected),
+            InReviewCount = submissions.Count(s => s.Status == SubmissionStatus.InReview),
+        };
+
+        var completedSubmissions = submissions
+            .Where(s => (s.Status == SubmissionStatus.Approved || s.Status == SubmissionStatus.Rejected) && s.ReviewedAt.HasValue)
+            .ToList();
+
+        if (completedSubmissions.Count > 0)
+        {
+            result.OverallAverageTurnaroundHours = Math.Round(
+                completedSubmissions.Average(s => (s.ReviewedAt!.Value - s.CreatedAt).TotalHours),
+                2);
+        }
+
+        var allSteps = submissions.SelectMany(s => s.ApprovalSteps).ToList();
+        var stepGroups = allSteps.GroupBy(s => s.OrderIndex).OrderBy(g => g.Key);
+
+        foreach (var group in stepGroups)
+        {
+            var reviewedSteps = group.Where(s => s.ReviewedAt.HasValue).ToList();
+            var avgHours = reviewedSteps.Count > 0
+                ? Math.Round(reviewedSteps.Average(s => (s.ReviewedAt!.Value - s.CreatedAt).TotalHours), 2)
+                : 0.0;
+
+            result.StepMetrics.Add(new WorkflowStepMetricDto
+            {
+                OrderIndex = group.Key,
+                StepName = group.First().StepName,
+                TotalSubmissionsProcessed = group.Count(s => s.Status == ApprovalStepStatus.Approved || s.Status == ApprovalStepStatus.Rejected),
+                PendingCount = group.Count(s => s.Status == ApprovalStepStatus.Pending),
+                AverageReviewTimeHours = avgHours
+            });
+        }
+
+        return result;
+    }
+
     private static ApprovalWorkflowDto MapToDto(ApprovalWorkflow workflow)
     {
         return new ApprovalWorkflowDto
