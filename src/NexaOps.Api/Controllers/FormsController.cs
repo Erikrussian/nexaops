@@ -386,5 +386,20 @@ public class FormsController : ControllerBase
         var result = await _workflowService.GetWorkflowAnalyticsAsync(companyId, formId, cancellationToken);
         return Ok(result);
     }
+
+    /// <summary>
+    /// POST /companies/{companyId}/workflow/escalate-overdue - Quét và tự động leo thang các bước quá hạn SLA
+    /// </summary>
+    [HttpPost("companies/{companyId:guid}/workflow/escalate-overdue")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult> EscalateOverdue(
+        [FromRoute] Guid companyId,
+        CancellationToken cancellationToken)
+    {
+        var count = await _workflowService.EscalateOverdueStepsAsync(companyId, cancellationToken);
+        return Ok(new { escalatedCount = count, message = $"Đã quét và kích hoạt cảnh báo leo thang cho {count} bước quá hạn SLA" });
+    }
 }
+
 

@@ -65,6 +65,10 @@ public class SubmissionApprovalStepDto
     public Guid? SpecificApproverUserId { get; set; }
     public string? SpecificApproverUserName { get; set; }
     public bool AllowSelfApproval { get; set; }
+    public int? TimeLimitHours { get; set; }
+    public DateTime? DueDate { get; set; }
+    public bool IsOverdue { get; set; }
+    public bool IsEscalated { get; set; }
     public ApprovalStepStatus Status { get; set; }
     public Guid? ReviewedById { get; set; }
     public string? ReviewedByName { get; set; }

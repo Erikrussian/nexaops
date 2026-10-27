@@ -721,6 +721,92 @@ public class ApprovalWorkflowService : IApprovalWorkflowService
         };
     }
 
+    public async Task<int> EscalateOverdueStepsAsync(Guid companyId, CancellationToken cancellationToken = default)
+    {
+        await _companyAccessService.EnsureReadAccessAsync(companyId, cancellationToken);
+        var now = DateTime.UtcNow;
+
+        var overdueSteps = await _context.SubmissionApprovalSteps
+            .Include(s => s.Submission)
+                .ThenInclude(sub => sub!.FormDefinition)
+            .Include(s => s.SpecificApproverUser)
+            .Where(s => s.Submission!.CompanyId == companyId &&
+                        s.Status == ApprovalStepStatus.Pending &&
+                        !s.IsEscalated &&
+                        s.DueDate.HasValue &&
+                        s.DueDate.Value < now)
+            .ToListAsync(cancellationToken);
+
+        if (overdueSteps.Count == 0)
+        {
+            return 0;
+        }
+
+        var company = await _context.Companies.FirstOrDefaultAsync(c => c.Id == companyId, cancellationToken);
+        var ownerId = company?.OwnerId;
+
+        // Fetch admins
+        var adminUserIds = await _context.CompanyMembers
+            .Where(m => m.CompanyId == companyId && m.UserId.HasValue && m.Role == MemberRole.Admin)
+            .Select(m => m.UserId!.Value)
+            .ToListAsync(cancellationToken);
+
+        var currentUserId = _currentUserService.UserId ?? Guid.Empty;
+
+        foreach (var step in overdueSteps)
+        {
+            step.IsEscalated = true;
+            step.ReviewNotes = string.IsNullOrWhiteSpace(step.ReviewNotes)
+                ? "[SLA LEO THANG]: Quá hạn phê duyệt quy định"
+                : $"{step.ReviewNotes} | [SLA LEO THANG]: Quá hạn phê duyệt quy định";
+            step.UpdatedAt = now;
+
+            var formTitle = step.Submission?.FormDefinition?.Title ?? "biểu mẫu";
+
+            // Target users to notify: Owner, Admins, and Specific Approver (if designated)
+            var usersToNotify = new HashSet<Guid>();
+            if (ownerId.HasValue) usersToNotify.Add(ownerId.Value);
+            foreach (var aId in adminUserIds) usersToNotify.Add(aId);
+            if (step.SpecificApproverUserId.HasValue) usersToNotify.Add(step.SpecificApproverUserId.Value);
+
+            foreach (var uId in usersToNotify)
+            {
+                await _notificationService.CreateNotificationAsync(new CreateNotificationDto
+                {
+                    UserId = uId,
+                    CompanyId = companyId,
+                    Type = NotificationType.ApprovalRequired,
+                    Title = "Cảnh báo quá hạn SLA phê duyệt",
+                    Message = $"Bước '{step.StepName}' của hồ sơ '{formTitle}' đã vượt quá hạn SLA quy định ({step.TimeLimitHours}h). Yêu cầu xử lý khẩn cấp.",
+                    LinkUrl = $"/forms/submissions/{step.SubmissionId}"
+                }, cancellationToken);
+            }
+
+            // Audit Log
+            await _auditLogService.LogAsync(
+                companyId: companyId,
+                actorId: currentUserId,
+                action: "ESCALATE_STEP_SLA",
+                entityType: "FormSubmission",
+                entityId: step.SubmissionId.ToString(),
+                details: new { StepOrder = step.OrderIndex, StepName = step.StepName, DueDate = step.DueDate },
+                cancellationToken: cancellationToken);
+
+            // SignalR event
+            if (_realtimeNotificationService != null)
+            {
+                await _realtimeNotificationService.BroadcastWorkflowEventAsync(
+                    companyId,
+                    "WorkflowStepUpdated",
+                    new { submissionId = step.SubmissionId, stepOrder = step.OrderIndex, isEscalated = true, isOverdue = true },
+                    cancellationToken);
+            }
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return overdueSteps.Count;
+    }
+
     private static SubmissionApprovalStepDto MapStepToDto(SubmissionApprovalStep step)
     {
         return new SubmissionApprovalStepDto
@@ -734,6 +820,10 @@ public class ApprovalWorkflowService : IApprovalWorkflowService
             SpecificApproverUserId = step.SpecificApproverUserId,
             SpecificApproverUserName = step.SpecificApproverUser?.Name,
             AllowSelfApproval = step.AllowSelfApproval,
+            TimeLimitHours = step.TimeLimitHours,
+            DueDate = step.DueDate,
+            IsOverdue = step.Status == ApprovalStepStatus.Pending && step.DueDate.HasValue && step.DueDate.Value < DateTime.UtcNow,
+            IsEscalated = step.IsEscalated,
             Status = step.Status,
             ReviewedById = step.ReviewedById,
             ReviewedByName = step.ReviewedBy?.Name,
@@ -744,3 +834,4 @@ public class ApprovalWorkflowService : IApprovalWorkflowService
         };
     }
 }
+

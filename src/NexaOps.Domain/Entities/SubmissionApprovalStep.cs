@@ -14,6 +14,9 @@ public class SubmissionApprovalStep
     public Guid? SpecificApproverUserId { get; set; }
     public User? SpecificApproverUser { get; set; }
     public bool AllowSelfApproval { get; set; }
+    public int? TimeLimitHours { get; set; }
+    public DateTime? DueDate { get; set; }
+    public bool IsEscalated { get; set; } = false;
     public ApprovalStepStatus Status { get; set; } = ApprovalStepStatus.Pending;
     public Guid? ReviewedById { get; set; }
     public User? ReviewedBy { get; set; }

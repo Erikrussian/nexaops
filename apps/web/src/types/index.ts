@@ -219,6 +219,10 @@ export interface SubmissionApprovalStep {
   specificApproverUserId?: string
   specificApproverUserName?: string
   allowSelfApproval: boolean
+  timeLimitHours?: number | null
+  dueDate?: string | null
+  isOverdue?: boolean
+  isEscalated?: boolean
   status: ApprovalStepStatus
   reviewedById?: string
   reviewedByName?: string

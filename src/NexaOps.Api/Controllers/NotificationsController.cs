@@ -86,4 +86,36 @@ public class NotificationsController : ControllerBase
         var count = await _notificationService.MarkAllAsReadAsync(currentUserId, companyId, cancellationToken);
         return Ok(count);
     }
+
+    /// <summary>
+    /// DELETE /notifications/{notificationId} - Xóa một thông báo
+    /// </summary>
+    [HttpDelete("{notificationId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteNotification(
+        [FromRoute] Guid notificationId,
+        CancellationToken cancellationToken = default)
+    {
+        var currentUserId = _currentUserService.UserId!.Value;
+        await _notificationService.DeleteNotificationAsync(notificationId, currentUserId, cancellationToken);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// DELETE /notifications/clear-all - Xóa toàn bộ thông báo trong tổ chức của người dùng
+    /// </summary>
+    [HttpDelete("clear-all")]
+    [ProducesResponseType(typeof(int), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<int>> ClearAll(
+        [FromQuery] Guid companyId,
+        CancellationToken cancellationToken = default)
+    {
+        var currentUserId = _currentUserService.UserId!.Value;
+        var count = await _notificationService.ClearAllNotificationsAsync(currentUserId, companyId, cancellationToken);
+        return Ok(count);
+    }
 }
+

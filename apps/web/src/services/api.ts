@@ -542,6 +542,27 @@ class ApiClient {
       method: 'POST',
     })
   }
+
+  async deleteNotification(id: string): Promise<void> {
+    return this.request<void>(`/notifications/${id}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async clearAllNotifications(companyId: string): Promise<number> {
+    return this.request<number>(`/notifications/clear-all?companyId=${companyId}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async escalateOverdueWorkflowSteps(companyId: string): Promise<{ escalatedCount: number; message: string }> {
+    return this.request<{ escalatedCount: number; message: string }>(
+      `/companies/${companyId}/workflow/escalate-overdue`,
+      {
+        method: 'POST',
+      }
+    )
+  }
 }
 
 export const api = new ApiClient()

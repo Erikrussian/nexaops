@@ -166,6 +166,7 @@ export function FormSubmissionsInbox({
   const [workflowAnalytics, setWorkflowAnalytics] = useState<WorkflowAnalytics | null>(null)
   const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false)
   const [analyticsFormTitle, setAnalyticsFormTitle] = useState('')
+  const [isScanningSla, setIsScanningSla] = useState(false)
 
   // Sync preselectedFormId when changed from parent
   useEffect(() => {
@@ -377,6 +378,21 @@ export function FormSubmissionsInbox({
       setWorkflowAnalytics(null)
     } finally {
       setIsLoadingAnalytics(false)
+    }
+  }
+
+  // Trigger Manual SLA Escalation Scan
+  const handleScanSla = async () => {
+    if (!activeCompany?.id || isScanningSla) return
+    setIsScanningSla(true)
+    try {
+      const res = await api.escalateOverdueWorkflowSteps(activeCompany.id)
+      setActionSuccessMsg(res.message || 'Đã hoàn tất quét và leo thang SLA')
+      fetchSubmissions()
+    } catch (err: any) {
+      setStepReviewError(err.message || 'Lỗi khi quét SLA')
+    } finally {
+      setIsScanningSla(false)
     }
   }
 
@@ -655,6 +671,18 @@ export function FormSubmissionsInbox({
               <BarChart3 size={13} /> Phân tích SLA
             </button>
           )}
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={handleScanSla}
+            disabled={isScanningSla}
+            title="Quét và kích hoạt leo thang các bước quá hạn SLA"
+            style={{
+              borderColor: 'rgba(245, 158, 11, 0.4)',
+              color: 'var(--accent-amber)',
+            }}
+          >
+            <Clock size={13} className={isScanningSla ? 'spin' : ''} /> Quét SLA
+          </button>
           <button
             className="btn btn-secondary btn-sm"
             onClick={fetchSubmissions}
@@ -1111,45 +1139,83 @@ export function FormSubmissionsInbox({
                               <div style={{ fontWeight: 700, color: 'white', fontSize: '0.9rem' }}>
                                 Cấp {step.orderIndex}: {step.stepName}
                               </div>
-                              <span
-                                style={{
-                                  fontSize: '0.72rem',
-                                  fontWeight: 700,
-                                  textTransform: 'uppercase',
-                                  padding: '0.2rem 0.55rem',
-                                  borderRadius: '10px',
-                                  background: isApproved
-                                    ? 'rgba(16, 185, 129, 0.15)'
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                {step.isOverdue && (
+                                  <span
+                                    style={{
+                                      fontSize: '0.68rem',
+                                      fontWeight: 800,
+                                      padding: '0.15rem 0.5rem',
+                                      borderRadius: '10px',
+                                      background: 'rgba(239, 68, 68, 0.25)',
+                                      color: '#f87171',
+                                      border: '1px solid #ef4444',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.25rem',
+                                    }}
+                                  >
+                                    <Clock size={11} /> QUÁ HẠN SLA
+                                  </span>
+                                )}
+                                {step.isEscalated && (
+                                  <span
+                                    style={{
+                                      fontSize: '0.68rem',
+                                      fontWeight: 800,
+                                      padding: '0.15rem 0.5rem',
+                                      borderRadius: '10px',
+                                      background: 'rgba(245, 158, 11, 0.2)',
+                                      color: '#fbbf24',
+                                      border: '1px solid #f59e0b',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.25rem',
+                                    }}
+                                  >
+                                    <AlertTriangle size={11} /> ĐÃ LEO THANG
+                                  </span>
+                                )}
+                                <span
+                                  style={{
+                                    fontSize: '0.72rem',
+                                    fontWeight: 700,
+                                    textTransform: 'uppercase',
+                                    padding: '0.2rem 0.55rem',
+                                    borderRadius: '10px',
+                                    background: isApproved
+                                      ? 'rgba(16, 185, 129, 0.15)'
+                                      : isRejected
+                                      ? 'rgba(244, 63, 94, 0.15)'
+                                      : isSkipped
+                                      ? 'rgba(148, 163, 184, 0.15)'
+                                      : 'rgba(245, 158, 11, 0.15)',
+                                    color: isApproved
+                                      ? '#6ee7b7'
+                                      : isRejected
+                                      ? '#fca5a5'
+                                      : isSkipped
+                                      ? '#cbd5e1'
+                                      : '#fde68a',
+                                    border: '1px solid',
+                                    borderColor: isApproved
+                                      ? 'rgba(16, 185, 129, 0.3)'
+                                      : isRejected
+                                      ? 'rgba(244, 63, 94, 0.3)'
+                                      : isSkipped
+                                      ? 'rgba(148, 163, 184, 0.3)'
+                                      : 'rgba(245, 158, 11, 0.3)',
+                                  }}
+                                >
+                                  {isApproved
+                                    ? 'Đã Phê Duyệt'
                                     : isRejected
-                                    ? 'rgba(244, 63, 94, 0.15)'
+                                    ? 'Đã Từ Chối'
                                     : isSkipped
-                                    ? 'rgba(148, 163, 184, 0.15)'
-                                    : 'rgba(245, 158, 11, 0.15)',
-                                  color: isApproved
-                                    ? '#6ee7b7'
-                                    : isRejected
-                                    ? '#fca5a5'
-                                    : isSkipped
-                                    ? '#cbd5e1'
-                                    : '#fde68a',
-                                  border: '1px solid',
-                                  borderColor: isApproved
-                                    ? 'rgba(16, 185, 129, 0.3)'
-                                    : isRejected
-                                    ? 'rgba(244, 63, 94, 0.3)'
-                                    : isSkipped
-                                    ? 'rgba(148, 163, 184, 0.3)'
-                                    : 'rgba(245, 158, 11, 0.3)',
-                                }}
-                              >
-                                {isApproved
-                                  ? 'Đã Phê Duyệt'
-                                  : isRejected
-                                  ? 'Đã Từ Chối'
-                                  : isSkipped
-                                  ? 'Đã Bỏ Qua'
-                                  : 'Đang Chờ Duyệt'}
-                              </span>
+                                    ? 'Đã Bỏ Qua'
+                                    : 'Đang Chờ Duyệt'}
+                                </span>
+                              </div>
                             </div>
 
                             <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.3rem' }}>
@@ -1168,6 +1234,11 @@ export function FormSubmissionsInbox({
                                     : step.stepType === 2
                                     ? step.specificApproverUserName || 'Nhân sự được chỉ định'
                                     : 'Theo vai trò thành viên'}
+                                </span>
+                              )}
+                              {step.dueDate && (
+                                <span style={{ marginLeft: '0.5rem', color: step.isOverdue ? '#f87171' : 'var(--text-muted)' }}>
+                                  • Hạn SLA: {formatDate(step.dueDate)} {step.timeLimitHours ? `(${step.timeLimitHours}h)` : ''}
                                 </span>
                               )}
                             </div>

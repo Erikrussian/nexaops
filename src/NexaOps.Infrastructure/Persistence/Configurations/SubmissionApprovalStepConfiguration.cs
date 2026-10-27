@@ -25,6 +25,13 @@ public class SubmissionApprovalStepConfiguration : IEntityTypeConfiguration<Subm
         builder.Property(s => s.Status)
             .IsRequired();
 
+        builder.Property(s => s.TimeLimitHours);
+
+        builder.Property(s => s.DueDate);
+
+        builder.Property(s => s.IsEscalated)
+            .HasDefaultValue(false);
+
         builder.Property(s => s.ReviewNotes)
             .HasMaxLength(2000);
 

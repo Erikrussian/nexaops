@@ -632,5 +632,122 @@ public class ApprovalWorkflowTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Single(analytics.StepMetrics);
         Assert.Equal(1, analytics.StepMetrics[0].TotalSubmissionsProcessed);
     }
+
+    [Fact]
+    public async Task NotificationsApi_DeleteAndClearAll_ShouldRemoveNotificationsCorrectly()
+    {
+        var (ownerToken, companyId, _) = await SetupCompanyAndOwnerAsync();
+        var form = await CreatePublishedFormAsync(ownerToken, companyId);
+
+        // Submit form twice to create notifications
+        for (int i = 0; i < 2; i++)
+        {
+            var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+            {
+                Content = JsonContent.Create(new SubmitFormDto
+                {
+                    Data = new Dictionary<string, object?> { ["reason"] = $"Notif test {i}" }
+                })
+            };
+            submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+            await _client.SendAsync(submitMsg);
+        }
+
+        // List notifications
+        var listMsg = new HttpRequestMessage(HttpMethod.Get, $"/notifications?companyId={companyId}");
+        listMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var listRes = await _client.SendAsync(listMsg);
+        var notifList = await listRes.Content.ReadFromJsonAsync<NotificationListResponse>(JsonOptions);
+        Assert.NotNull(notifList);
+        Assert.True(notifList.Items.Count >= 2);
+
+        var firstId = notifList.Items[0].Id;
+
+        // Delete single notification
+        var delMsg = new HttpRequestMessage(HttpMethod.Delete, $"/notifications/{firstId}");
+        delMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var delRes = await _client.SendAsync(delMsg);
+        Assert.Equal(HttpStatusCode.NoContent, delRes.StatusCode);
+
+        // Clear all notifications
+        var clearMsg = new HttpRequestMessage(HttpMethod.Delete, $"/notifications/clear-all?companyId={companyId}");
+        clearMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var clearRes = await _client.SendAsync(clearMsg);
+        Assert.Equal(HttpStatusCode.OK, clearRes.StatusCode);
+
+        // Verify count is now 0
+        var countMsg = new HttpRequestMessage(HttpMethod.Get, $"/notifications/unread-count?companyId={companyId}");
+        countMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var countRes = await _client.SendAsync(countMsg);
+        var count = await countRes.Content.ReadFromJsonAsync<int>(JsonOptions);
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public async Task WorkflowSla_StepDueDatesAndEscalation_ShouldTrackDeadlinesAndEscalate()
+    {
+        var (ownerToken, companyId, _) = await SetupCompanyAndOwnerAsync();
+        var form = await CreatePublishedFormAsync(ownerToken, companyId);
+
+        // Create workflow with step SLA 24 hours
+        var wfMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/workflow")
+        {
+            Content = JsonContent.Create(new CreateOrUpdateWorkflowDto
+            {
+                Name = "SLA Workflow",
+                IsActive = true,
+                Steps = new List<CreateOrUpdateApprovalStepDto>
+                {
+                    new()
+                    {
+                        OrderIndex = 1,
+                        Name = "Urgent SLA Step",
+                        StepType = ApprovalStepType.CompanyOwner,
+                        TimeLimitHours = 24
+                    }
+                }
+            })
+        };
+        wfMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var wfRes = await _client.SendAsync(wfMsg);
+        Assert.Equal(HttpStatusCode.OK, wfRes.StatusCode);
+
+        // Submit form
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["reason"] = "SLA deadline test" }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var submitRes = await _client.SendAsync(submitMsg);
+        var sub = await submitRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.NotNull(sub);
+
+        // Get timeline and verify SLA fields
+        var timelineMsg = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/companies/{companyId}/submissions/{sub.Id}/workflow-timeline");
+        timelineMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var timelineRes = await _client.SendAsync(timelineMsg);
+        var timeline = await timelineRes.Content.ReadFromJsonAsync<List<SubmissionApprovalStepDto>>(JsonOptions);
+
+        Assert.NotNull(timeline);
+        Assert.Single(timeline);
+        Assert.Equal(24, timeline[0].TimeLimitHours);
+        Assert.NotNull(timeline[0].DueDate);
+        Assert.False(timeline[0].IsOverdue);
+        Assert.False(timeline[0].IsEscalated);
+
+        // Trigger SLA escalation scan
+        var scanMsg = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/companies/{companyId}/workflow/escalate-overdue");
+        scanMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var scanRes = await _client.SendAsync(scanMsg);
+        Assert.Equal(HttpStatusCode.OK, scanRes.StatusCode);
+    }
 }
+
 

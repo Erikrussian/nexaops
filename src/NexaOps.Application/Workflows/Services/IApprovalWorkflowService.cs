@@ -11,4 +11,5 @@ public interface IApprovalWorkflowService
     Task<SubmissionApprovalStepDto> ProcessStepApprovalAsync(Guid companyId, Guid submissionId, int stepOrder, StepApprovalActionDto dto, CancellationToken cancellationToken = default);
     Task<SubmissionApprovalStepDto> DelegateStepAsync(Guid companyId, Guid submissionId, int stepOrder, DelegateStepDto dto, CancellationToken cancellationToken = default);
     Task<WorkflowAnalyticsDto> GetWorkflowAnalyticsAsync(Guid companyId, Guid formId, CancellationToken cancellationToken = default);
+    Task<int> EscalateOverdueStepsAsync(Guid companyId, CancellationToken cancellationToken = default);
 }

@@ -13,6 +13,7 @@ import {
   RefreshCw,
   ExternalLink,
   Check,
+  Trash2,
 } from 'lucide-react'
 
 interface NotificationCenterProps {
@@ -131,6 +132,31 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
       console.error('Failed to mark all notifications as read:', err)
     } finally {
       setIsMarkingAll(false)
+    }
+  }
+
+  const handleDeleteNotification = async (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    try {
+      await api.deleteNotification(id)
+      const target = notifications.find((n) => n.id === id)
+      setNotifications((prev) => prev.filter((n) => n.id !== id))
+      if (target && !target.isRead) {
+        setUnreadCount((c) => Math.max(0, c - 1))
+      }
+    } catch (err) {
+      console.error('Failed to delete notification:', err)
+    }
+  }
+
+  const handleClearAll = async () => {
+    if (!companyId || notifications.length === 0) return
+    try {
+      await api.clearAllNotifications(companyId)
+      setNotifications([])
+      setUnreadCount(0)
+    } catch (err) {
+      console.error('Failed to clear notifications:', err)
     }
   }
 
@@ -307,6 +333,30 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 >
                   <CheckCheck size={14} />
                   {isMarkingAll ? 'Đang lưu...' : 'Đã đọc hết'}
+                </button>
+              )}
+              {notifications.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.2rem',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    padding: '0.2rem 0.35rem',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
+                  title="Xóa toàn bộ thông báo"
+                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent-rose)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
+                >
+                  <Trash2 size={13} />
+                  Xóa hết
                 </button>
               )}
               <button
@@ -515,26 +565,46 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                       }}
                     >
                       <span>{formatRelativeTime(n.createdAt)}</span>
-                      {!n.isRead && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        {!n.isRead && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleMarkAsRead(n.id, e)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--primary-light)',
+                              fontSize: '0.7rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.2rem',
+                              padding: 0,
+                            }}
+                          >
+                            <Check size={11} /> Đã đọc
+                          </button>
+                        )}
                         <button
                           type="button"
-                          onClick={(e) => handleMarkAsRead(n.id, e)}
+                          onClick={(e) => handleDeleteNotification(n.id, e)}
+                          title="Xóa thông báo này"
                           style={{
                             background: 'none',
                             border: 'none',
-                            color: 'var(--primary-light)',
-                            fontSize: '0.7rem',
-                            fontWeight: 600,
+                            color: 'var(--text-muted)',
                             cursor: 'pointer',
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '0.2rem',
                             padding: 0,
                           }}
+                          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent-rose)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
                         >
-                          <Check size={11} /> Đã đọc
+                          <Trash2 size={12} />
                         </button>
-                      )}
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -175,4 +175,40 @@ public class NotificationService : INotificationService
 
         return resultDto;
     }
+
+    public async Task DeleteNotificationAsync(Guid notificationId, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var notification = await _context.Notifications
+            .FirstOrDefaultAsync(n => n.Id == notificationId, cancellationToken);
+
+        if (notification == null)
+        {
+            throw new KeyNotFoundException($"Không tìm thấy thông báo với ID: {notificationId}");
+        }
+
+        if (notification.UserId != userId)
+        {
+            throw new ForbiddenAccessException("Bạn không có quyền xóa thông báo của người dùng khác");
+        }
+
+        _context.Notifications.Remove(notification);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<int> ClearAllNotificationsAsync(Guid userId, Guid companyId, CancellationToken cancellationToken = default)
+    {
+        var notifications = await _context.Notifications
+            .Where(n => n.UserId == userId && n.CompanyId == companyId)
+            .ToListAsync(cancellationToken);
+
+        if (notifications.Count == 0)
+        {
+            return 0;
+        }
+
+        _context.Notifications.RemoveRange(notifications);
+        await _context.SaveChangesAsync(cancellationToken);
+        return notifications.Count;
+    }
 }
+
