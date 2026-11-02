@@ -74,6 +74,9 @@ public static class DependencyInjection
             };
         });
 
+        // 4. Background SLA Escalation Service
+        services.AddHostedService<WorkflowSlaEscalationBackgroundService>();
+
         return services;
     }
 }

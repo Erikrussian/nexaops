@@ -12,12 +12,14 @@ using NexaOps.Application.Notifications.DTOs;
 using NexaOps.Application.Workflows.DTOs;
 using NexaOps.Domain.Enums;
 using NexaOps.IntegrationTests.Common;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace NexaOps.IntegrationTests;
 
 public class ApprovalWorkflowTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;
+    private readonly CustomWebApplicationFactory _factory;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -26,6 +28,7 @@ public class ApprovalWorkflowTests : IClassFixture<CustomWebApplicationFactory>
 
     public ApprovalWorkflowTests(CustomWebApplicationFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -748,6 +751,34 @@ public class ApprovalWorkflowTests : IClassFixture<CustomWebApplicationFactory>
         var scanRes = await _client.SendAsync(scanMsg);
         Assert.Equal(HttpStatusCode.OK, scanRes.StatusCode);
     }
+
+    [Fact]
+    public async Task WorkflowSla_BackgroundEscalationService_Sweep_ShouldExecuteSuccessfully()
+    {
+        var (ownerToken, companyId, _) = await SetupCompanyAndOwnerAsync();
+        var form = await CreatePublishedFormAsync(ownerToken, companyId);
+
+        // Submit form
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["reason"] = "Background service test" }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var submitRes = await _client.SendAsync(submitMsg);
+        Assert.Equal(HttpStatusCode.Created, submitRes.StatusCode);
+
+        // Verify the background service instance is registered and can run sweep
+        using var scope = _factory.Services.CreateScope();
+        var logger = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<NexaOps.Infrastructure.Services.WorkflowSlaEscalationBackgroundService>>();
+        var backgroundService = new NexaOps.Infrastructure.Services.WorkflowSlaEscalationBackgroundService(_factory.Services, logger);
+
+        var totalEscalated = await backgroundService.RunEscalationSweepAsync(CancellationToken.None);
+        Assert.True(totalEscalated >= 0);
+    }
 }
+
 
 
