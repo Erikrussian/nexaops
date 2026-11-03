@@ -723,7 +723,10 @@ public class ApprovalWorkflowService : IApprovalWorkflowService
 
     public async Task<int> EscalateOverdueStepsAsync(Guid companyId, CancellationToken cancellationToken = default)
     {
-        await _companyAccessService.EnsureReadAccessAsync(companyId, cancellationToken);
+        if (_currentUserService.IsAuthenticated)
+        {
+            await _companyAccessService.EnsureReadAccessAsync(companyId, cancellationToken);
+        }
         var now = DateTime.UtcNow;
 
         var overdueSteps = await _context.SubmissionApprovalSteps
@@ -751,7 +754,7 @@ public class ApprovalWorkflowService : IApprovalWorkflowService
             .Select(m => m.UserId!.Value)
             .ToListAsync(cancellationToken);
 
-        var currentUserId = _currentUserService.UserId ?? Guid.Empty;
+        var currentUserId = _currentUserService.UserId;
 
         foreach (var step in overdueSteps)
         {

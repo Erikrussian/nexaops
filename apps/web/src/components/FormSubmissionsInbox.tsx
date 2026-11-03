@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import type {
   FormSubmission,
   FormDefinition,
@@ -176,7 +176,7 @@ export function FormSubmissionsInbox({
   }, [preselectedFormId])
 
   // Fetch real submissions when activeCompany changes
-  const fetchSubmissions = async () => {
+  const fetchSubmissions = useCallback(async () => {
     if (!activeCompany?.id) return
     setIsLoading(true)
     try {
@@ -189,11 +189,11 @@ export function FormSubmissionsInbox({
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [activeCompany?.id])
 
   useEffect(() => {
     fetchSubmissions()
-  }, [activeCompany?.id])
+  }, [fetchSubmissions])
 
   // Filter submissions
   const filteredSubmissions = useMemo(() => {

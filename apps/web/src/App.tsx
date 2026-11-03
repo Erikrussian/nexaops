@@ -189,7 +189,7 @@ function AppContent() {
           <div style={{ display: 'flex', gap: '1.25rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
             <span>Backend: .NET 10 & PostgreSQL JSONB</span>
             <span>Frontend: React 19 & TypeScript</span>
-            <span style={{ color: 'var(--accent-emerald)', fontWeight: 600 }}>74/74 Tests Passed</span>
+            <span style={{ color: 'var(--accent-emerald)', fontWeight: 600 }}>85/85 Tests Passed</span>
           </div>
         </div>
       </footer>

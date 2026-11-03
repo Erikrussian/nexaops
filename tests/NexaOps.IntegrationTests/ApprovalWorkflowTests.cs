@@ -758,6 +758,29 @@ public class ApprovalWorkflowTests : IClassFixture<CustomWebApplicationFactory>
         var (ownerToken, companyId, _) = await SetupCompanyAndOwnerAsync();
         var form = await CreatePublishedFormAsync(ownerToken, companyId);
 
+        // Create workflow with step SLA 1 hour
+        var wfMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/workflow")
+        {
+            Content = JsonContent.Create(new CreateOrUpdateWorkflowDto
+            {
+                Name = "Overdue Background SLA Workflow",
+                IsActive = true,
+                Steps = new List<CreateOrUpdateApprovalStepDto>
+                {
+                    new()
+                    {
+                        OrderIndex = 1,
+                        Name = "Background Overdue Step",
+                        StepType = ApprovalStepType.CompanyOwner,
+                        TimeLimitHours = 1
+                    }
+                }
+            })
+        };
+        wfMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var wfRes = await _client.SendAsync(wfMsg);
+        Assert.Equal(HttpStatusCode.OK, wfRes.StatusCode);
+
         // Submit form
         var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
         {
@@ -769,6 +792,17 @@ public class ApprovalWorkflowTests : IClassFixture<CustomWebApplicationFactory>
         submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
         var submitRes = await _client.SendAsync(submitMsg);
         Assert.Equal(HttpStatusCode.Created, submitRes.StatusCode);
+        var sub = await submitRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.NotNull(sub);
+
+        // Manually adjust the step due date in the database to be in the past
+        using (var setupScope = _factory.Services.CreateScope())
+        {
+            var db = setupScope.ServiceProvider.GetRequiredService<NexaOps.Application.Common.Interfaces.IApplicationDbContext>();
+            var step = db.SubmissionApprovalSteps.First(s => s.SubmissionId == sub.Id && s.OrderIndex == 1);
+            step.DueDate = DateTime.UtcNow.AddHours(-2);
+            await db.SaveChangesAsync();
+        }
 
         // Verify the background service instance is registered and can run sweep
         using var scope = _factory.Services.CreateScope();
@@ -776,7 +810,13 @@ public class ApprovalWorkflowTests : IClassFixture<CustomWebApplicationFactory>
         var backgroundService = new NexaOps.Infrastructure.Services.WorkflowSlaEscalationBackgroundService(_factory.Services, logger);
 
         var totalEscalated = await backgroundService.RunEscalationSweepAsync(CancellationToken.None);
-        Assert.True(totalEscalated >= 0);
+        Assert.True(totalEscalated >= 1);
+
+        // Verify step is now marked as escalated
+        var dbAfter = scope.ServiceProvider.GetRequiredService<NexaOps.Application.Common.Interfaces.IApplicationDbContext>();
+        var stepAfter = dbAfter.SubmissionApprovalSteps.First(s => s.SubmissionId == sub.Id && s.OrderIndex == 1);
+        Assert.True(stepAfter.IsEscalated);
+        Assert.Contains("[SLA LEO THANG]", stepAfter.ReviewNotes);
     }
 }
 

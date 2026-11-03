@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -60,9 +61,9 @@ public class WorkflowSlaEscalationBackgroundService : BackgroundService
         var workflowService = scope.ServiceProvider.GetRequiredService<IApprovalWorkflowService>();
 
         // Query distinct company IDs with active form submissions
-        var companyIds = context.Companies
+        var companyIds = await context.Companies
             .Select(c => c.Id)
-            .ToList();
+            .ToListAsync(cancellationToken);
 
         var totalEscalated = 0;
 

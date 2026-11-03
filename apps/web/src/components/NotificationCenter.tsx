@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from '../services/api'
 import { signalRService } from '../services/signalr'
 import type { AppNotification } from '../types'
@@ -33,7 +33,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   const [isMarkingAll, setIsMarkingAll] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  const fetchUnreadCount = async () => {
+  const fetchUnreadCount = useCallback(async () => {
     if (!companyId) return
     try {
       const res = await api.getUnreadNotificationCount(companyId)
@@ -41,9 +41,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
     } catch {
       // Ignore background poll errors
     }
-  }
+  }, [companyId])
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
     if (!companyId) return
     setIsLoading(true)
     try {
@@ -60,13 +60,13 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [companyId, activeFilter])
 
   useEffect(() => {
     fetchUnreadCount()
     const interval = setInterval(fetchUnreadCount, 30000)
     return () => clearInterval(interval)
-  }, [companyId])
+  }, [fetchUnreadCount])
 
   // SignalR real-time notification receiver
   useEffect(() => {
@@ -89,7 +89,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
     if (isOpen && companyId) {
       fetchNotifications()
     }
-  }, [isOpen, activeFilter, companyId])
+  }, [isOpen, companyId, fetchNotifications])
 
   // Close dropdown on outside click
   useEffect(() => {
