@@ -276,28 +276,29 @@ public class FormSubmissionService : IFormSubmissionService
             throw new ArgumentException("Trạng thái duyệt phải là Approved hoặc Rejected", nameof(dto.Status));
         }
 
+        // NX-SEC-002: Workflow-managed submissions must be reviewed through the approval workflow engine, not legacy review
+        if (submission.ApprovalSteps != null && submission.ApprovalSteps.Count > 0)
+        {
+            throw new InvalidOperationException("Hồ sơ này được quản lý bởi quy trình phê duyệt đa bước (Approval Workflow). Vui lòng thực hiện phê duyệt qua từng bước của quy trình và không sử dụng phương thức duyệt trực tiếp.");
+        }
+
+        // Terminal state integrity: submissions already in a terminal state cannot be re-reviewed
+        if (submission.Status is SubmissionStatus.Approved or SubmissionStatus.Rejected or SubmissionStatus.Cancelled)
+        {
+            throw new InvalidOperationException($"Hồ sơ đã ở trạng thái kết thúc ({submission.Status}), không thể phê duyệt lại.");
+        }
+
+        // Self-approval protection for legacy single-step review
+        if (submission.SubmittedById == currentUserId)
+        {
+            throw new ForbiddenAccessException("Người nộp không thể tự phê duyệt hồ sơ của chính mình.");
+        }
+
         submission.Status = dto.Status;
         submission.ReviewNotes = dto.Notes?.Trim();
         submission.ReviewedById = currentUserId;
         submission.ReviewedAt = DateTime.UtcNow;
         submission.UpdatedAt = DateTime.UtcNow;
-
-        // If multi-step workflow snapshot exists, update steps accordingly for elevated review
-        if (submission.ApprovalSteps != null && submission.ApprovalSteps.Count > 0)
-        {
-            var targetStatus = dto.Status == SubmissionStatus.Approved ? ApprovalStepStatus.Approved : ApprovalStepStatus.Rejected;
-            foreach (var step in submission.ApprovalSteps)
-            {
-                if (step.Status == ApprovalStepStatus.Pending)
-                {
-                    step.Status = targetStatus;
-                    step.ReviewedById = currentUserId;
-                    step.ReviewedAt = DateTime.UtcNow;
-                    step.ReviewNotes = dto.Notes?.Trim();
-                    step.UpdatedAt = DateTime.UtcNow;
-                }
-            }
-        }
 
         await _context.SaveChangesAsync(cancellationToken);
 

@@ -60,3 +60,5 @@ Thumbs.db
 
 # Local agent directory
 .agents/
+
+/docs/audits/
