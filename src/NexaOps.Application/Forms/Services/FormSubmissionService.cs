@@ -118,7 +118,8 @@ public class FormSubmissionService : IFormSubmissionService
                     SpecificApproverUserId = step.SpecificApproverUserId,
                     AllowSelfApproval = step.AllowSelfApproval,
                     TimeLimitHours = step.TimeLimitHours,
-                    DueDate = step.TimeLimitHours.HasValue ? DateTime.UtcNow.AddHours(step.TimeLimitHours.Value) : null,
+                    // NX-BIZ-002: Only activate SLA DueDate for the first step on creation; subsequent steps activate when current step advances
+                    DueDate = (step.OrderIndex == 1 && step.TimeLimitHours.HasValue) ? DateTime.UtcNow.AddHours(step.TimeLimitHours.Value) : null,
                     IsEscalated = false,
                     Status = ApprovalStepStatus.Pending,
                     CreatedAt = DateTime.UtcNow,

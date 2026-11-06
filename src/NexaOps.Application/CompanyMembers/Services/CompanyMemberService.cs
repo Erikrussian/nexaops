@@ -4,6 +4,8 @@ using NexaOps.Application.Common.Exceptions;
 using NexaOps.Application.Common.Interfaces;
 using NexaOps.Application.Companies.DTOs;
 using NexaOps.Application.CompanyMembers.DTOs;
+using NexaOps.Application.Departments.DTOs;
+using NexaOps.Application.Users.DTOs;
 using NexaOps.Domain.Entities;
 using NexaOps.Domain.Enums;
 
@@ -158,19 +160,46 @@ public class CompanyMemberService : ICompanyMemberService
 
     public async Task<IReadOnlyList<CompanyMemberResponse>> GetMembersByCompanyAsync(Guid companyId, CancellationToken cancellationToken = default)
     {
-        await _companyAccessService.EnsureCanManageMembersAsync(companyId, cancellationToken);
+        await _companyAccessService.EnsureReadAccessAsync(companyId, cancellationToken);
 
-        var members = await _context.CompanyMembers
+        var query = _context.CompanyMembers
             .Include(m => m.User)
             .Include(m => m.Department)
             .Include(m => m.InvitedBy)
             .AsNoTracking()
-            .Where(m => m.CompanyId == companyId)
+            .Where(m => m.CompanyId == companyId);
+
+        var isOwner = await _companyAccessService.IsOwnerAsync(companyId, cancellationToken);
+        var role = await _companyAccessService.GetUserRoleInCompanyAsync(companyId, cancellationToken);
+        var canManage = isOwner || role == MemberRole.Admin;
+
+        // Least privilege: non-management members only see active members
+        if (!canManage)
+        {
+            query = query.Where(m => m.Status == MemberStatus.Active);
+        }
+
+        var memberEntities = await query
             .OrderByDescending(m => m.CreatedAt)
-            .Select(m => CompanyMemberResponse.FromEntity(m))
             .ToListAsync(cancellationToken);
 
-        return members;
+        return memberEntities.Select(m => new CompanyMemberResponse
+        {
+            Id = m.Id,
+            CompanyId = m.CompanyId,
+            UserId = m.UserId,
+            User = m.User is not null ? UserResponse.FromEntity(m.User) : null,
+            Email = m.Email,
+            DepartmentId = m.DepartmentId,
+            Department = m.Department is not null ? DepartmentResponse.FromEntity(m.Department) : null,
+            Role = m.Role.ToString().ToUpperInvariant(),
+            Status = m.Status.ToString().ToUpperInvariant(),
+            InviteExpiresAt = canManage ? m.InviteExpiresAt : null,
+            InvitedById = canManage ? m.InvitedById : null,
+            InvitedBy = canManage && m.InvitedBy is not null ? UserResponse.FromEntity(m.InvitedBy) : null,
+            CreatedAt = m.CreatedAt,
+            UpdatedAt = m.UpdatedAt
+        }).ToList();
     }
 
     public async Task<CompanyMemberResponse> UpdateMemberAsync(Guid memberId, UpdateMemberRequest request, CancellationToken cancellationToken = default)

@@ -39,21 +39,32 @@ class ApiClient {
   private unauthorizedListeners: Array<() => void> = []
 
   constructor() {
-    this.token = localStorage.getItem('nexaops_token')
+    // NX-SEC-004: Pure in-memory access token storage. Zero web storage persistence.
+    this.token = null
+    try {
+      localStorage.removeItem('nexaops_token')
+    } catch {
+      // Ignore storage errors in restricted contexts
+    }
   }
 
   setToken(token: string | null) {
     this.token = token
-    if (token) {
-      localStorage.setItem('nexaops_token', token)
-    } else {
+    // NX-SEC-004: Ensure any legacy stored token is purged
+    try {
       localStorage.removeItem('nexaops_token')
+    } catch {
+      // Ignore storage errors
     }
   }
 
   clearToken() {
     this.token = null
-    localStorage.removeItem('nexaops_token')
+    try {
+      localStorage.removeItem('nexaops_token')
+    } catch {
+      // Ignore storage errors
+    }
   }
 
   getToken(): string | null {

@@ -14,9 +14,14 @@ public interface IFormValidatorService
 
 public class FormValidatorService : IFormValidatorService
 {
+    private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(250);
+    private const int MaxPatternLength = 500;
+    private const int MaxRegexInputLength = 10000;
+
     private static readonly Regex EmailRegex = new(
         @"^[^@\s]+@[^@\s]+\.[^@\s]+$",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        RegexOptions.Compiled | RegexOptions.IgnoreCase,
+        TimeSpan.FromMilliseconds(250));
 
     public void ValidateSubmissionData(List<FormFieldDto> schemaFields, Dictionary<string, object?> data)
     {
@@ -70,9 +75,9 @@ public class FormValidatorService : IFormValidatorService
                     }
                     if (!string.IsNullOrWhiteSpace(field.Pattern))
                     {
-                        if (!Regex.IsMatch(strVal, field.Pattern))
+                        if (!SafeIsMatch(strVal, field.Pattern, out var regexError))
                         {
-                            AddError(errors, fieldName, $"{label} format is invalid.");
+                            AddError(errors, fieldName, regexError != null ? $"{label}: {regexError}" : $"{label} format is invalid.");
                         }
                     }
                     break;
@@ -241,5 +246,55 @@ public class FormValidatorService : IFormValidatorService
             errors[key] = list;
         }
         list.Add(message);
+    }
+
+    private static bool SafeIsMatch(string input, string pattern, out string? errorMessage)
+    {
+        errorMessage = null;
+
+        if (pattern.Length > MaxPatternLength)
+        {
+            errorMessage = "Validation pattern is too long.";
+            return false;
+        }
+
+        if (input.Length > MaxRegexInputLength)
+        {
+            errorMessage = "Input value exceeds maximum allowed length for pattern matching.";
+            return false;
+        }
+
+        try
+        {
+            // 1. Attempt non-backtracking engine first for linear time complexity guarantees
+            try
+            {
+                return Regex.IsMatch(
+                    input,
+                    pattern,
+                    RegexOptions.NonBacktracking | RegexOptions.CultureInvariant,
+                    RegexMatchTimeout);
+            }
+            catch (ArgumentException)
+            {
+                // Pattern uses constructs unsupported by NonBacktracking (e.g. lookarounds/backreferences);
+                // fallback to standard engine with strict timeout
+                return Regex.IsMatch(
+                    input,
+                    pattern,
+                    RegexOptions.CultureInvariant,
+                    RegexMatchTimeout);
+            }
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            errorMessage = "Pattern evaluation timed out.";
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            errorMessage = "Validation pattern is invalid.";
+            return false;
+        }
     }
 }

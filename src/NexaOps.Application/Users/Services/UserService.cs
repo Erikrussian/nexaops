@@ -186,6 +186,18 @@ public class UserService : IUserService
         if (!string.IsNullOrWhiteSpace(request.Password))
         {
             user.PasswordHash = _passwordHasher.HashPassword(request.Password);
+
+            // NX-SEC-005: Revoke all active refresh token sessions upon password change
+            var activeSessions = await _context.RefreshTokens
+                .Where(rt => rt.UserId == user.Id && rt.RevokedAt == null)
+                .ToListAsync(cancellationToken);
+
+            var now = DateTime.UtcNow;
+            foreach (var session in activeSessions)
+            {
+                session.RevokedAt = now;
+                session.ReasonRevoked = "Revoked due to password change";
+            }
         }
 
         if (request.Role.HasValue)

@@ -299,6 +299,13 @@ public class ApprovalWorkflowService : IApprovalWorkflowService
                 submission.Status = SubmissionStatus.InReview;
                 submission.UpdatedAt = DateTime.UtcNow;
 
+                // NX-BIZ-002: Activate SLA DueDate for newly activated step
+                if (nextStep.TimeLimitHours.HasValue && !nextStep.DueDate.HasValue)
+                {
+                    nextStep.DueDate = DateTime.UtcNow.AddHours(nextStep.TimeLimitHours.Value);
+                    nextStep.UpdatedAt = DateTime.UtcNow;
+                }
+
                 // Notify next step approver(s)
                 await NotifyStepApproversAsync(companyId, nextStep, submission, cancellationToken);
 
@@ -542,6 +549,11 @@ public class ApprovalWorkflowService : IApprovalWorkflowService
             throw new KeyNotFoundException($"Không tìm thấy bài nộp với ID: {submissionId}");
         }
 
+        if (submission.Status is SubmissionStatus.Approved or SubmissionStatus.Rejected or SubmissionStatus.Cancelled)
+        {
+            throw new InvalidOperationException($"Hồ sơ đã ở trạng thái kết thúc ({submission.Status}), không thể ủy quyền bước duyệt");
+        }
+
         var step = submission.ApprovalSteps.FirstOrDefault(s => s.OrderIndex == stepOrder);
         if (step == null)
         {
@@ -734,6 +746,8 @@ public class ApprovalWorkflowService : IApprovalWorkflowService
                 .ThenInclude(sub => sub!.FormDefinition)
             .Include(s => s.SpecificApproverUser)
             .Where(s => s.Submission!.CompanyId == companyId &&
+                        s.Submission.Status == SubmissionStatus.InReview &&
+                        s.OrderIndex == s.Submission.CurrentStepOrder &&
                         s.Status == ApprovalStepStatus.Pending &&
                         !s.IsEscalated &&
                         s.DueDate.HasValue &&
