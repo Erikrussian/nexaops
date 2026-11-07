@@ -41,15 +41,17 @@ public class DepartmentService : IDepartmentService
             throw new InvalidOperationException($"Phòng ban với tên '{request.Name}' đã tồn tại trong công ty");
         }
 
-        if (request.ParentId.HasValue)
+        Guid? parentId = null;
+        if (request.ParentId.HasValue && request.ParentId.Value != Guid.Empty)
         {
             var parent = await _context.Departments
-                .FirstOrDefaultAsync(d => d.Id == request.ParentId.Value && d.CompanyId == companyId, cancellationToken);
+                .FirstOrDefaultAsync(d => d.Id == request.ParentId.Value && d.CompanyId == companyId && d.IsActive, cancellationToken);
 
             if (parent is null)
             {
                 throw new KeyNotFoundException("Phòng ban cha (parentId) không tồn tại trong công ty này");
             }
+            parentId = parent.Id;
         }
 
         if (request.ManagerId.HasValue)
@@ -71,7 +73,7 @@ public class DepartmentService : IDepartmentService
             CompanyId = companyId,
             Name = normalizedName,
             Code = request.Code?.Trim(),
-            ParentId = request.ParentId,
+            ParentId = parentId,
             ManagerId = request.ManagerId,
             Description = request.Description?.Trim(),
             IsActive = true,
@@ -156,20 +158,52 @@ public class DepartmentService : IDepartmentService
 
         if (request.ParentId.HasValue)
         {
-            if (request.ParentId.Value == id)
+            if (request.ParentId.Value == Guid.Empty)
             {
-                throw new InvalidOperationException("Phòng ban không thể làm cha của chính nó");
+                // NX-BIZ-004: Reparent to root
+                department.ParentId = null;
             }
-
-            var parentExists = await _context.Departments
-                .AnyAsync(d => d.Id == request.ParentId.Value && d.CompanyId == department.CompanyId, cancellationToken);
-
-            if (!parentExists)
+            else
             {
-                throw new KeyNotFoundException("Phòng ban cha (parentId) không tồn tại trong công ty này");
-            }
+                if (request.ParentId.Value == id)
+                {
+                    throw new InvalidOperationException("Phòng ban không thể làm cha của chính nó");
+                }
 
-            department.ParentId = request.ParentId.Value;
+                var parent = await _context.Departments
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(d => d.Id == request.ParentId.Value && d.CompanyId == department.CompanyId && d.IsActive, cancellationToken);
+
+                if (parent is null)
+                {
+                    throw new KeyNotFoundException("Phòng ban cha (parentId) không tồn tại trong công ty này");
+                }
+
+                // NX-BIZ-004: Reject indirect multi-level cycles (e.g. A -> B -> A, A -> B -> C -> A)
+                // Traverse upwards from prospective parent to ensure it doesn't lead back to 'id'
+                var companyDepts = await _context.Departments
+                    .AsNoTracking()
+                    .Where(d => d.CompanyId == department.CompanyId && d.IsActive)
+                    .Select(d => new { d.Id, d.ParentId })
+                    .ToListAsync(cancellationToken);
+
+                var parentMap = companyDepts.ToDictionary(d => d.Id, d => d.ParentId);
+
+                var visited = new HashSet<Guid> { id };
+                var curr = request.ParentId.Value;
+
+                while (parentMap.TryGetValue(curr, out var nextParentId) && nextParentId.HasValue)
+                {
+                    if (visited.Contains(nextParentId.Value))
+                    {
+                        throw new InvalidOperationException("Không thể thiết lập quan hệ phòng ban cha - con vì sẽ tạo ra chu trình lặp (vòng tròn phân cấp)");
+                    }
+                    visited.Add(curr);
+                    curr = nextParentId.Value;
+                }
+
+                department.ParentId = request.ParentId.Value;
+            }
         }
 
         if (request.ManagerId.HasValue)
@@ -237,11 +271,16 @@ public class DepartmentService : IDepartmentService
     private static List<DepartmentTreeNodeResponse> BuildDepartmentTree(List<Department> departments)
     {
         var nodeMap = new Dictionary<Guid, DepartmentTreeNodeResponse>();
+        var parentMap = new Dictionary<Guid, Guid>();
         var rootNodes = new List<DepartmentTreeNodeResponse>();
 
         foreach (var dept in departments)
         {
             nodeMap[dept.Id] = DepartmentTreeNodeResponse.FromEntity(dept);
+            if (dept.ParentId.HasValue)
+            {
+                parentMap[dept.Id] = dept.ParentId.Value;
+            }
         }
 
         foreach (var dept in departments)
@@ -249,7 +288,34 @@ public class DepartmentService : IDepartmentService
             var node = nodeMap[dept.Id];
             if (dept.ParentId.HasValue && nodeMap.TryGetValue(dept.ParentId.Value, out var parentNode))
             {
-                parentNode.Children.Add(node);
+                // NX-BIZ-004: Detect and break cycles in corrupted historical data to avoid infinite traversal / JSON recursion
+                var curr = parentNode.Id;
+                var hasCycle = false;
+                var visited = new HashSet<Guid> { node.Id };
+
+                while (curr != Guid.Empty)
+                {
+                    if (visited.Contains(curr))
+                    {
+                        hasCycle = true;
+                        break;
+                    }
+                    visited.Add(curr);
+                    if (!parentMap.TryGetValue(curr, out curr))
+                    {
+                        break;
+                    }
+                }
+
+                if (!hasCycle)
+                {
+                    parentNode.Children.Add(node);
+                }
+                else
+                {
+                    // Break corrupted cycle by promoting node to root
+                    rootNodes.Add(node);
+                }
             }
             else
             {
