@@ -575,18 +575,53 @@ public class ApprovalWorkflowService : IApprovalWorkflowService
             await VerifyReviewerEligibilityAsync(companyId, currentUserId, step, submission, cancellationToken);
         }
 
-        // Verify new approver exists and is a member of the company
+        // NX-BIZ-005: Verify new approver exists and is an ACTIVE member of the company (or the Owner)
+        var company = await _context.Companies
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == companyId, cancellationToken);
+
         var targetMember = await _context.CompanyMembers
             .Include(m => m.User)
             .FirstOrDefaultAsync(m => m.CompanyId == companyId && m.UserId == dto.NewApproverUserId, cancellationToken);
 
-        if (targetMember == null)
+        var isTargetOwner = company != null && company.OwnerId == dto.NewApproverUserId;
+
+        if (targetMember == null && !isTargetOwner)
         {
             throw new KeyNotFoundException("Nhân sự được ủy quyền không thuộc công ty này");
         }
 
+        User? targetUser = null;
+        if (targetMember != null)
+        {
+            if (targetMember.Status == MemberStatus.Suspended)
+            {
+                throw new InvalidOperationException("Không thể ủy quyền phê duyệt cho thành viên đang bị đình chỉ (Suspended)");
+            }
+
+            if (targetMember.Status != MemberStatus.Active)
+            {
+                throw new InvalidOperationException("Không thể ủy quyền phê duyệt cho nhân sự chưa kích hoạt hoặc chưa chấp nhận lời mời tham gia");
+            }
+
+            if (targetMember.User != null && !targetMember.User.IsActive)
+            {
+                throw new InvalidOperationException("Không thể ủy quyền phê duyệt cho tài khoản người dùng đã bị vô hiệu hóa");
+            }
+
+            targetUser = targetMember.User;
+        }
+        else if (isTargetOwner)
+        {
+            targetUser = await _context.Users.FirstOrDefaultAsync(u => u.Id == dto.NewApproverUserId, cancellationToken);
+            if (targetUser != null && !targetUser.IsActive)
+            {
+                throw new InvalidOperationException("Không thể ủy quyền phê duyệt cho tài khoản người dùng đã bị vô hiệu hóa");
+            }
+        }
+
         // Anti-fraud check: Cannot delegate to submitter unless self-approval is explicitly allowed
-        if (!step.AllowSelfApproval && targetMember.UserId == submission.SubmittedById)
+        if (!step.AllowSelfApproval && dto.NewApproverUserId == submission.SubmittedById)
         {
             throw new InvalidOperationException("Không thể ủy quyền duyệt cho chính người nộp hồ sơ do chính sách chống xung đột lợi ích");
         }
@@ -596,7 +631,7 @@ public class ApprovalWorkflowService : IApprovalWorkflowService
 
         var oldApproverId = step.SpecificApproverUserId;
         step.SpecificApproverUserId = dto.NewApproverUserId;
-        step.SpecificApproverUser = targetMember.User;
+        step.SpecificApproverUser = targetUser;
         step.StepType = ApprovalStepType.SpecificUser;
         step.ReviewNotes = $"[Ủy quyền từ {delegatorName}]: {dto.Reason ?? "Chuyển giao quyền duyệt"}";
         step.UpdatedAt = DateTime.UtcNow;
