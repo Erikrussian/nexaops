@@ -40,6 +40,8 @@ public class GlobalExceptionMiddleware
             NexaOps.Application.Common.Exceptions.ValidationException => (int)HttpStatusCode.BadRequest,
             InvalidOperationException => (int)HttpStatusCode.BadRequest,
             ArgumentException => (int)HttpStatusCode.BadRequest,
+            JsonException => (int)HttpStatusCode.BadRequest,
+            BadHttpRequestException => (int)HttpStatusCode.BadRequest,
             _ => (int)HttpStatusCode.InternalServerError
         };
 

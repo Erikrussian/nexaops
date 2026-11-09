@@ -726,4 +726,553 @@ public class SecurityRemediationSprint2Tests : IClassFixture<CustomWebApplicatio
     }
 
     #endregion
+
+    #region NX-DATA-001: JSONB Submission Payload Validation
+
+    private async Task<FormDefinitionDto> CreatePublishedFormWithSchemaAsync(
+        string ownerToken,
+        Guid companyId,
+        List<FormFieldDto> fields,
+        string title = "Form Schema Test")
+    {
+        var formMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms")
+        {
+            Content = JsonContent.Create(new CreateFormDto
+            {
+                Title = $"{title} {Guid.NewGuid():N}",
+                Code = "FST_" + Guid.NewGuid().ToString("N")[..6],
+                Fields = fields
+            })
+        };
+        formMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var formRes = await _client.SendAsync(formMsg);
+        Assert.Equal(HttpStatusCode.Created, formRes.StatusCode);
+        var form = await formRes.Content.ReadFromJsonAsync<FormDefinitionDto>(JsonOptions);
+
+        var pubMsg = new HttpRequestMessage(HttpMethod.Patch, $"/companies/{companyId}/forms/{form!.Id}/status")
+        {
+            Content = JsonContent.Create(new ChangeFormStatusDto { Status = FormStatus.Published })
+        };
+        pubMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var pubRes = await _client.SendAsync(pubMsg);
+        Assert.Equal(HttpStatusCode.OK, pubRes.StatusCode);
+
+        return form;
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_ValidPayload_ConformingToSchema_Succeeds()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("ValidPayload");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "fullName", Name = "fullName", Label = "Họ và tên", Type = FormFieldType.Text, Required = true },
+            new() { Id = "age", Name = "age", Label = "Tuổi", Type = FormFieldType.Number, Required = true, Min = 18, Max = 100 },
+            new() { Id = "email", Name = "email", Label = "Email", Type = FormFieldType.Email, Required = true },
+            new() { Id = "department", Name = "department", Label = "Phòng ban", Type = FormFieldType.Select, Required = true, Options = new() { "Eng", "HR" } },
+            new() { Id = "skills", Name = "skills", Label = "Kỹ năng", Type = FormFieldType.Checkbox, Required = false, Options = new() { "C#", "React", "SQL" } }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields);
+
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?>
+                {
+                    ["fullName"] = "Nguyen Van A",
+                    ["age"] = 28,
+                    ["email"] = "nguyenvana@nexaops.com",
+                    ["department"] = "Eng",
+                    ["skills"] = new List<string> { "C#", "SQL" }
+                }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+
+        Assert.Equal(HttpStatusCode.Created, submitRes.StatusCode);
+        var subDto = await submitRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.NotNull(subDto);
+        Assert.Equal("Nguyen Van A", subDto.Data["fullName"]?.ToString());
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_RequiredFields_MissingOrNull_ReturnsBadRequest()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("ReqField");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "fullName", Name = "fullName", Label = "Họ và tên", Type = FormFieldType.Text, Required = true },
+            new() { Id = "email", Name = "email", Label = "Email", Type = FormFieldType.Email, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields);
+
+        // Missing required field fullName
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?>
+                {
+                    ["email"] = "test@nexaops.com"
+                }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+
+        Assert.Equal(HttpStatusCode.BadRequest, submitRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_OptionalFields_CanBeOmittedOrNull_Succeeds()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("OptField");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "title", Name = "title", Label = "Tiêu đề", Type = FormFieldType.Text, Required = true },
+            new() { Id = "notes", Name = "notes", Label = "Ghi chú", Type = FormFieldType.Textarea, Required = false }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields);
+
+        // Omit optional field notes
+        var submitMsg1 = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["title"] = "Báo cáo A" }
+            })
+        };
+        submitMsg1.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes1 = await _client.SendAsync(submitMsg1);
+        Assert.Equal(HttpStatusCode.Created, submitRes1.StatusCode);
+
+        // Send null for optional field notes
+        var submitMsg2 = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["title"] = "Báo cáo B", ["notes"] = null }
+            })
+        };
+        submitMsg2.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes2 = await _client.SendAsync(submitMsg2);
+        Assert.Equal(HttpStatusCode.Created, submitRes2.StatusCode);
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_UnexpectedTopLevelField_ReturnsBadRequest()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("UnexpTop");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "name", Name = "name", Label = "Tên", Type = FormFieldType.Text, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields);
+
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?>
+                {
+                    ["name"] = "Alice",
+                    ["isAdmin"] = true,
+                    ["__injectedRole"] = "Owner"
+                }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+
+        Assert.Equal(HttpStatusCode.BadRequest, submitRes.StatusCode);
+        var responseBody = await submitRes.Content.ReadAsStringAsync();
+        Assert.Contains("isAdmin", responseBody);
+        Assert.Contains("__injectedRole", responseBody);
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_UnexpectedNestedField_ReturnsBadRequest()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("UnexpNest");
+        var fields = new List<FormFieldDto>
+        {
+            new()
+            {
+                Id = "address",
+                Name = "address",
+                Label = "Địa chỉ",
+                Type = FormFieldType.Text,
+                Fields = new List<FormFieldDto>
+                {
+                    new() { Id = "street", Name = "street", Label = "Đường", Type = FormFieldType.Text, Required = true },
+                    new() { Id = "city", Name = "city", Label = "Thành phố", Type = FormFieldType.Text, Required = true }
+                }
+            }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields);
+
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?>
+                {
+                    ["address"] = new Dictionary<string, object?>
+                    {
+                        ["street"] = "123 Main St",
+                        ["city"] = "Hanoi",
+                        ["unauthorizedSecret"] = "maliciousData"
+                    }
+                }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+
+        Assert.Equal(HttpStatusCode.BadRequest, submitRes.StatusCode);
+        var responseBody = await submitRes.Content.ReadAsStringAsync();
+        Assert.Contains("address.unauthorizedSecret", responseBody);
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_InvalidFieldType_NumberField_NonNumeric_ReturnsBadRequest()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("InvNum");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "amount", Name = "amount", Label = "Số tiền", Type = FormFieldType.Number, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields);
+
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?>
+                {
+                    ["amount"] = "not_a_number"
+                }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+
+        Assert.Equal(HttpStatusCode.BadRequest, submitRes.StatusCode);
+        var responseBody = await submitRes.Content.ReadAsStringAsync();
+        Assert.Contains("amount", responseBody);
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_InvalidFieldType_EmailField_ReturnsBadRequest()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("InvEmail");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "contactEmail", Name = "contactEmail", Label = "Email liên hệ", Type = FormFieldType.Email, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields);
+
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?>
+                {
+                    ["contactEmail"] = "invalid-email-string"
+                }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+
+        Assert.Equal(HttpStatusCode.BadRequest, submitRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_InvalidSelectOption_ReturnsBadRequest()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("InvSelect");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "branch", Name = "branch", Label = "Chi nhánh", Type = FormFieldType.Select, Required = true, Options = new() { "North", "South" } }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields);
+
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?>
+                {
+                    ["branch"] = "East"
+                }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+
+        Assert.Equal(HttpStatusCode.BadRequest, submitRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_InvalidCheckboxItemType_ReturnsBadRequest()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("InvCheck");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "categories", Name = "categories", Label = "Danh mục", Type = FormFieldType.Checkbox, Required = true, Options = new() { "A", "B", "C" } }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields);
+
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?>
+                {
+                    ["categories"] = new List<string> { "A", "Z" } // "Z" is not allowed
+                }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+
+        Assert.Equal(HttpStatusCode.BadRequest, submitRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_ValidNestedPayload_Succeeds()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("ValidNest");
+        var fields = new List<FormFieldDto>
+        {
+            new()
+            {
+                Id = "profile",
+                Name = "profile",
+                Label = "Hồ sơ cá nhân",
+                Type = FormFieldType.Text,
+                Fields = new List<FormFieldDto>
+                {
+                    new() { Id = "bio", Name = "bio", Label = "Tiểu sử", Type = FormFieldType.Text, Required = true },
+                    new() { Id = "yearsExperience", Name = "yearsExperience", Label = "Số năm kinh nghiệm", Type = FormFieldType.Number, Required = true }
+                }
+            }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields);
+
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?>
+                {
+                    ["profile"] = new Dictionary<string, object?>
+                    {
+                        ["bio"] = "Senior Engineer",
+                        ["yearsExperience"] = 10
+                    }
+                }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+
+        Assert.Equal(HttpStatusCode.Created, submitRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_ValidArrayPayload_Succeeds()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("ValidArr");
+        var fields = new List<FormFieldDto>
+        {
+            new()
+            {
+                Id = "items",
+                Name = "items",
+                Label = "Danh sách mục",
+                Type = FormFieldType.Text,
+                Fields = new List<FormFieldDto>
+                {
+                    new() { Id = "title", Name = "title", Label = "Tiêu đề", Type = FormFieldType.Text, Required = true },
+                    new() { Id = "qty", Name = "qty", Label = "Số lượng", Type = FormFieldType.Number, Required = true }
+                }
+            }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields);
+
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?>
+                {
+                    ["items"] = new List<Dictionary<string, object?>>
+                    {
+                        new() { ["title"] = "Laptop", ["qty"] = 1 },
+                        new() { ["title"] = "Mouse", ["qty"] = 2 }
+                    }
+                }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+
+        Assert.Equal(HttpStatusCode.Created, submitRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_MalformedJsonPayload_ReturnsBadRequest_NotInternalServerError()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("Malformed");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "text", Name = "text", Label = "Văn bản", Type = FormFieldType.Text, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields);
+
+        var rawInvalidJson = "{ \"data\": { \"text\": \"hello\", broken_json_syntax...";
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = new StringContent(rawInvalidJson, System.Text.Encoding.UTF8, "application/json")
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+
+        Assert.Equal(HttpStatusCode.BadRequest, submitRes.StatusCode);
+        Assert.NotEqual(HttpStatusCode.InternalServerError, submitRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_CrossTenantFormSubmission_ReturnsNotFoundOrForbidden()
+    {
+        var (tokenA, companyIdA, _) = await SetupCompanyAndOwnerAsync("TenantA");
+        var (tokenB, companyIdB, _) = await SetupCompanyAndOwnerAsync("TenantB");
+
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "name", Name = "name", Label = "Tên", Type = FormFieldType.Text, Required = true }
+        };
+        var formA = await CreatePublishedFormWithSchemaAsync(tokenA, companyIdA, fields);
+
+        // User B attempts to submit to Form of Company A using Company B's endpoint
+        var crossMsg1 = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyIdB}/forms/{formA.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["name"] = "Attacker" }
+            })
+        };
+        crossMsg1.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenB);
+        var crossRes1 = await _client.SendAsync(crossMsg1);
+        Assert.Equal(HttpStatusCode.NotFound, crossRes1.StatusCode);
+
+        // User B attempts to submit directly to Company A's endpoint
+        var crossMsg2 = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyIdA}/forms/{formA.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["name"] = "Attacker" }
+            })
+        };
+        crossMsg2.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenB);
+        var crossRes2 = await _client.SendAsync(crossMsg2);
+        Assert.Equal(HttpStatusCode.Forbidden, crossRes2.StatusCode);
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_HistoricalSubmissions_WithExtraFields_RemainReadable()
+    {
+        var (token, companyId, userId) = await SetupCompanyAndOwnerAsync("HistoricalSub");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "name", Name = "name", Label = "Tên", Type = FormFieldType.Text, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields);
+
+        // Insert historical submission directly with extra/legacy JSONB fields
+        var submissionId = Guid.NewGuid();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var historicalData = new Dictionary<string, object?>
+            {
+                ["name"] = "Old Employee",
+                ["legacy_field_1"] = 12345,
+                ["deprecated_metadata"] = "obsolete_value"
+            };
+            var sub = new FormSubmission
+            {
+                Id = submissionId,
+                FormDefinitionId = form.Id,
+                CompanyId = companyId,
+                SubmittedById = userId,
+                DataJson = JsonSerializer.Serialize(historicalData, JsonOptions),
+                Status = SubmissionStatus.Approved,
+                CurrentStepOrder = 1,
+                CreatedAt = DateTime.UtcNow.AddDays(-30),
+                UpdatedAt = DateTime.UtcNow.AddDays(-30)
+            };
+            db.FormSubmissions.Add(sub);
+            await db.SaveChangesAsync();
+        }
+
+        // Query submission through API
+        var getMsg = new HttpRequestMessage(HttpMethod.Get, $"/companies/{companyId}/submissions/{submissionId}");
+        getMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var getRes = await _client.SendAsync(getMsg);
+
+        Assert.Equal(HttpStatusCode.OK, getRes.StatusCode);
+        var subDto = await getRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.NotNull(subDto);
+        Assert.Equal("Old Employee", subDto.Data["name"]?.ToString());
+        Assert.True(subDto.Data.ContainsKey("legacy_field_1"));
+    }
+
+    [Fact]
+    public async Task NX_DATA_001_RejectedPayload_DoesNotCreatePartialRecord()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("NoPartialRec");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "code", Name = "code", Label = "Mã", Type = FormFieldType.Text, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields);
+
+        int initialCount;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            initialCount = await db.FormSubmissions.CountAsync(s => s.CompanyId == companyId && s.FormDefinitionId == form.Id);
+        }
+
+        // Submit rejected payload (with undeclared field)
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?>
+                {
+                    ["code"] = "VALID",
+                    ["unrecognizedField"] = "attack"
+                }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+        Assert.Equal(HttpStatusCode.BadRequest, submitRes.StatusCode);
+
+        // Verify count in database has not changed
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var currentCount = await db.FormSubmissions.CountAsync(s => s.CompanyId == companyId && s.FormDefinitionId == form.Id);
+            Assert.Equal(initialCount, currentCount);
+        }
+    }
+
+    #endregion
 }

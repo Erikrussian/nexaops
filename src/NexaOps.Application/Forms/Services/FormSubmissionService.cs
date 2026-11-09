@@ -76,6 +76,8 @@ public class FormSubmissionService : IFormSubmissionService
             schemaFields = new List<FormFieldDto>();
         }
 
+        dto ??= new SubmitFormDto();
+
         // Validate submission payload against schema
         _formValidatorService.ValidateSubmissionData(schemaFields, dto.Data ?? new Dictionary<string, object?>());
 

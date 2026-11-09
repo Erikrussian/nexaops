@@ -15,6 +15,7 @@ public class FormFieldDto
     public double? Min { get; set; }
     public double? Max { get; set; }
     public string? Pattern { get; set; }
+    public List<FormFieldDto>? Fields { get; set; }
 }
 
 public class CreateFormDto

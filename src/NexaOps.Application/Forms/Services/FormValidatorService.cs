@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -27,6 +28,45 @@ public class FormValidatorService : IFormValidatorService
     {
         var errors = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
+        ValidateSubmissionDataInternal(schemaFields ?? new(), data ?? new(), errors, string.Empty);
+
+        if (errors.Count > 0)
+        {
+            var resultErrors = errors.ToDictionary(k => k.Key, v => v.Value.ToArray());
+            throw new ValidationException(resultErrors);
+        }
+    }
+
+    private void ValidateSubmissionDataInternal(
+        List<FormFieldDto> schemaFields,
+        IDictionary<string, object?> data,
+        Dictionary<string, List<string>> errors,
+        string keyPrefix)
+    {
+        // 1. Determine allowed keys at this level
+        var allowedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in schemaFields)
+        {
+            if (!string.IsNullOrWhiteSpace(field.Name))
+            {
+                allowedKeys.Add(field.Name.Trim());
+            }
+            if (!string.IsNullOrWhiteSpace(field.Id))
+            {
+                allowedKeys.Add(field.Id.Trim());
+            }
+        }
+
+        // 2. Reject unexpected payload properties (Closed Schema)
+        foreach (var key in data.Keys)
+        {
+            if (!allowedKeys.Contains(key))
+            {
+                var fullKeyPath = string.IsNullOrEmpty(keyPrefix) ? key : $"{keyPrefix}.{key}";
+                AddError(errors, fullKeyPath, $"Trường không xác định '{fullKeyPath}' không được định nghĩa trong cấu hình biểu mẫu.");
+            }
+        }
+
         // Normalize keys for case-insensitive lookup
         var dataLookup = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var kvp in data)
@@ -34,12 +74,14 @@ public class FormValidatorService : IFormValidatorService
             dataLookup[kvp.Key] = kvp.Value;
         }
 
+        // 3. Validate each declared field
         foreach (var field in schemaFields)
         {
-            var fieldName = string.IsNullOrWhiteSpace(field.Name) ? field.Id : field.Name;
-            var label = string.IsNullOrWhiteSpace(field.Label) ? fieldName : field.Label;
+            var fieldIdentifier = string.IsNullOrWhiteSpace(field.Name) ? field.Id : field.Name;
+            var fullFieldKey = string.IsNullOrEmpty(keyPrefix) ? fieldIdentifier : $"{keyPrefix}.{fieldIdentifier}";
+            var label = string.IsNullOrWhiteSpace(field.Label) ? fieldIdentifier : field.Label;
 
-            var hasValue = dataLookup.TryGetValue(fieldName, out var rawVal);
+            var hasValue = dataLookup.TryGetValue(fieldIdentifier, out var rawVal);
             if (!hasValue && !string.IsNullOrWhiteSpace(field.Id))
             {
                 hasValue = dataLookup.TryGetValue(field.Id, out rawVal);
@@ -47,107 +89,333 @@ public class FormValidatorService : IFormValidatorService
 
             var (isEmpty, parsedVal) = EvaluateValue(rawVal);
 
-            // 1. Required Check
+            // Required Check
             if (field.Required && isEmpty)
             {
-                AddError(errors, fieldName, $"{label} is required.");
+                AddError(errors, fullFieldKey, $"{label} is required.");
                 continue;
             }
 
             if (isEmpty)
             {
-                continue; // Non-required empty field is valid
+                continue; // Non-required empty/null field is valid
             }
 
-            // 2. Type & Rule Validation
-            switch (field.Type)
+            // Check if field has nested sub-fields
+            if (field.Fields != null && field.Fields.Count > 0)
             {
-                case FormFieldType.Text:
-                case FormFieldType.Textarea:
+                ValidateNestedStructure(field, parsedVal, errors, fullFieldKey, label);
+                continue;
+            }
+
+            // Leaf field type & rule validation
+            ValidateFieldType(field, parsedVal, errors, fullFieldKey, label);
+        }
+    }
+
+    private void ValidateNestedStructure(
+        FormFieldDto field,
+        object? parsedVal,
+        Dictionary<string, List<string>> errors,
+        string fullFieldKey,
+        string label)
+    {
+        if (parsedVal is IDictionary<string, object?> nestedDict)
+        {
+            ValidateSubmissionDataInternal(field.Fields!, nestedDict, errors, fullFieldKey);
+        }
+        else if (parsedVal is JsonElement { ValueKind: JsonValueKind.Object } objElement)
+        {
+            var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var prop in objElement.EnumerateObject())
+            {
+                dict[prop.Name] = prop.Value;
+            }
+            ValidateSubmissionDataInternal(field.Fields!, dict, errors, fullFieldKey);
+        }
+        else if (parsedVal is JsonElement { ValueKind: JsonValueKind.Array } arrayElement)
+        {
+            int index = 0;
+            foreach (var item in arrayElement.EnumerateArray())
+            {
+                var itemKey = $"{fullFieldKey}[{index}]";
+                if (item.ValueKind == JsonValueKind.Object)
+                {
+                    var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var prop in item.EnumerateObject())
+                    {
+                        dict[prop.Name] = prop.Value;
+                    }
+                    ValidateSubmissionDataInternal(field.Fields!, dict, errors, itemKey);
+                }
+                else
+                {
+                    AddError(errors, itemKey, $"{label} item must be an object conforming to schema.");
+                }
+                index++;
+            }
+        }
+        else if (parsedVal is IEnumerable<IDictionary<string, object?>> list)
+        {
+            int index = 0;
+            foreach (var item in list)
+            {
+                var itemKey = $"{fullFieldKey}[{index}]";
+                ValidateSubmissionDataInternal(field.Fields!, item, errors, itemKey);
+                index++;
+            }
+        }
+        else if (parsedVal is IEnumerable<object> objList && parsedVal is not string)
+        {
+            int index = 0;
+            foreach (var item in objList)
+            {
+                var itemKey = $"{fullFieldKey}[{index}]";
+                if (item is IDictionary<string, object?> itemDict)
+                {
+                    ValidateSubmissionDataInternal(field.Fields!, itemDict, errors, itemKey);
+                }
+                else if (item is JsonElement { ValueKind: JsonValueKind.Object } itemEl)
+                {
+                    var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var prop in itemEl.EnumerateObject())
+                    {
+                        dict[prop.Name] = prop.Value;
+                    }
+                    ValidateSubmissionDataInternal(field.Fields!, dict, errors, itemKey);
+                }
+                else
+                {
+                    AddError(errors, itemKey, $"{label} item must be an object conforming to schema.");
+                }
+                index++;
+            }
+        }
+        else if (parsedVal is string jsonStr && jsonStr.TrimStart().StartsWith('{'))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(jsonStr);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var prop in doc.RootElement.EnumerateObject())
+                    {
+                        dict[prop.Name] = prop.Value.Clone();
+                    }
+                    ValidateSubmissionDataInternal(field.Fields!, dict, errors, fullFieldKey);
+                    return;
+                }
+            }
+            catch
+            {
+                AddError(errors, fullFieldKey, $"{label} contains malformed JSON object.");
+                return;
+            }
+        }
+        else if (parsedVal is string jsonArrStr && jsonArrStr.TrimStart().StartsWith('['))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(jsonArrStr);
+                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    int index = 0;
+                    foreach (var item in doc.RootElement.EnumerateArray())
+                    {
+                        var itemKey = $"{fullFieldKey}[{index}]";
+                        if (item.ValueKind == JsonValueKind.Object)
+                        {
+                            var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                            foreach (var prop in item.EnumerateObject())
+                            {
+                                dict[prop.Name] = prop.Value.Clone();
+                            }
+                            ValidateSubmissionDataInternal(field.Fields!, dict, errors, itemKey);
+                        }
+                        else
+                        {
+                            AddError(errors, itemKey, $"{label} item must be an object conforming to schema.");
+                        }
+                        index++;
+                    }
+                    return;
+                }
+            }
+            catch
+            {
+                AddError(errors, fullFieldKey, $"{label} contains malformed JSON array.");
+                return;
+            }
+        }
+        else
+        {
+            AddError(errors, fullFieldKey, $"{label} must be a valid object or array conforming to schema.");
+        }
+    }
+
+    private static void ValidateFieldType(
+        FormFieldDto field,
+        object? parsedVal,
+        Dictionary<string, List<string>> errors,
+        string fullFieldKey,
+        string label)
+    {
+        switch (field.Type)
+        {
+            case FormFieldType.Text:
+            case FormFieldType.Textarea:
+                if (parsedVal is JsonElement { ValueKind: JsonValueKind.Object or JsonValueKind.Array } ||
+                    (parsedVal is IEnumerable && parsedVal is not string))
+                {
+                    AddError(errors, fullFieldKey, $"{label} must be a valid text string.");
+                }
+                else
+                {
                     var strVal = parsedVal?.ToString() ?? string.Empty;
                     if (field.Min.HasValue && strVal.Length < field.Min.Value)
                     {
-                        AddError(errors, fieldName, $"{label} must be at least {field.Min.Value} characters.");
+                        AddError(errors, fullFieldKey, $"{label} must be at least {field.Min.Value} characters.");
                     }
                     if (field.Max.HasValue && strVal.Length > field.Max.Value)
                     {
-                        AddError(errors, fieldName, $"{label} cannot exceed {field.Max.Value} characters.");
+                        AddError(errors, fullFieldKey, $"{label} cannot exceed {field.Max.Value} characters.");
                     }
                     if (!string.IsNullOrWhiteSpace(field.Pattern))
                     {
                         if (!SafeIsMatch(strVal, field.Pattern, out var regexError))
                         {
-                            AddError(errors, fieldName, regexError != null ? $"{label}: {regexError}" : $"{label} format is invalid.");
+                            AddError(errors, fullFieldKey, regexError != null ? $"{label}: {regexError}" : $"{label} format is invalid.");
                         }
                     }
-                    break;
+                }
+                break;
 
-                case FormFieldType.Number:
-                    if (!TryConvertToDouble(parsedVal, out var numVal))
+            case FormFieldType.Number:
+                if (parsedVal is JsonElement { ValueKind: JsonValueKind.Object or JsonValueKind.Array } ||
+                    !TryConvertToDouble(parsedVal, out var numVal))
+                {
+                    AddError(errors, fullFieldKey, $"{label} must be a valid number.");
+                }
+                else
+                {
+                    if (field.Min.HasValue && numVal < field.Min.Value)
                     {
-                        AddError(errors, fieldName, $"{label} must be a valid number.");
+                        AddError(errors, fullFieldKey, $"{label} must be at least {field.Min.Value}.");
                     }
-                    else
+                    if (field.Max.HasValue && numVal > field.Max.Value)
                     {
-                        if (field.Min.HasValue && numVal < field.Min.Value)
-                        {
-                            AddError(errors, fieldName, $"{label} must be at least {field.Min.Value}.");
-                        }
-                        if (field.Max.HasValue && numVal > field.Max.Value)
-                        {
-                            AddError(errors, fieldName, $"{label} cannot exceed {field.Max.Value}.");
-                        }
+                        AddError(errors, fullFieldKey, $"{label} cannot exceed {field.Max.Value}.");
                     }
-                    break;
+                }
+                break;
 
-                case FormFieldType.Email:
+            case FormFieldType.Email:
+                if (parsedVal is JsonElement { ValueKind: JsonValueKind.Object or JsonValueKind.Array })
+                {
+                    AddError(errors, fullFieldKey, $"{label} must be a valid email address.");
+                }
+                else
+                {
                     var emailStr = parsedVal?.ToString()?.Trim() ?? string.Empty;
                     if (!EmailRegex.IsMatch(emailStr))
                     {
-                        AddError(errors, fieldName, $"{label} must be a valid email address.");
+                        AddError(errors, fullFieldKey, $"{label} must be a valid email address.");
                     }
-                    break;
+                }
+                break;
 
-                case FormFieldType.Date:
-                    if (!TryConvertToDateTime(parsedVal, out _))
-                    {
-                        AddError(errors, fieldName, $"{label} must be a valid date.");
-                    }
-                    break;
+            case FormFieldType.Date:
+                if (parsedVal is JsonElement { ValueKind: JsonValueKind.Object or JsonValueKind.Array } ||
+                    !TryConvertToDateTime(parsedVal, out _))
+                {
+                    AddError(errors, fullFieldKey, $"{label} must be a valid date.");
+                }
+                break;
 
-                case FormFieldType.Select:
+            case FormFieldType.Select:
+                if (parsedVal is JsonElement { ValueKind: JsonValueKind.Object or JsonValueKind.Array })
+                {
+                    AddError(errors, fullFieldKey, $"{label} must be a valid option string.");
+                }
+                else
+                {
                     var selectedStr = parsedVal?.ToString()?.Trim();
                     if (field.Options != null && field.Options.Count > 0)
                     {
                         if (string.IsNullOrEmpty(selectedStr) || !field.Options.Any(o => string.Equals(o, selectedStr, StringComparison.OrdinalIgnoreCase)))
                         {
-                            AddError(errors, fieldName, $"{label} must be one of: {string.Join(", ", field.Options)}.");
+                            AddError(errors, fullFieldKey, $"{label} must be one of: {string.Join(", ", field.Options)}.");
                         }
                     }
-                    break;
+                }
+                break;
 
-                case FormFieldType.Checkbox:
-                    // Checkbox can be boolean or selected values array
-                    if (parsedVal is bool)
+            case FormFieldType.Checkbox:
+                if (parsedVal is bool)
+                {
+                    // valid boolean
+                }
+                else if (parsedVal is JsonElement { ValueKind: JsonValueKind.True or JsonValueKind.False })
+                {
+                    // valid boolean
+                }
+                else if (bool.TryParse(parsedVal?.ToString(), out _))
+                {
+                    // valid boolean string
+                }
+                else if (parsedVal is JsonElement { ValueKind: JsonValueKind.Array } arrayElement)
+                {
+                    var selectedItems = new List<string>();
+                    bool hasTypeError = false;
+                    foreach (var item in arrayElement.EnumerateArray())
                     {
-                        // valid boolean
+                        if (item.ValueKind != JsonValueKind.String && item.ValueKind != JsonValueKind.Number)
+                        {
+                            AddError(errors, fullFieldKey, $"{label} array contains invalid item types.");
+                            hasTypeError = true;
+                            break;
+                        }
+                        var s = item.ToString();
+                        if (!string.IsNullOrWhiteSpace(s))
+                        {
+                            selectedItems.Add(s);
+                        }
                     }
-                    else if (bool.TryParse(parsedVal?.ToString(), out _))
+                    if (!hasTypeError && field.Options != null && field.Options.Count > 0)
                     {
-                        // valid boolean string
+                        foreach (var item in selectedItems)
+                        {
+                            if (!field.Options.Any(o => string.Equals(o, item, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                AddError(errors, fullFieldKey, $"{label} contains invalid option '{item}'. Allowed options: {string.Join(", ", field.Options)}.");
+                            }
+                        }
                     }
-                    else if (parsedVal is IEnumerable<object> || parsedVal is JsonElement { ValueKind: JsonValueKind.Array })
+                }
+                else if (parsedVal is IEnumerable enumerable && parsedVal is not string)
+                {
+                    var selectedItems = new List<string>();
+                    foreach (var item in enumerable)
                     {
-                        // Valid multiple choice
+                        if (item != null) selectedItems.Add(item.ToString()!);
                     }
-                    break;
-            }
-        }
-
-        if (errors.Count > 0)
-        {
-            var resultErrors = errors.ToDictionary(k => k.Key, v => v.Value.ToArray());
-            throw new ValidationException(resultErrors);
+                    if (field.Options != null && field.Options.Count > 0)
+                    {
+                        foreach (var item in selectedItems)
+                        {
+                            if (!field.Options.Any(o => string.Equals(o, item, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                AddError(errors, fullFieldKey, $"{label} contains invalid option '{item}'. Allowed options: {string.Join(", ", field.Options)}.");
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    AddError(errors, fullFieldKey, $"{label} must be a boolean or an array of selected options.");
+                }
+                break;
         }
     }
 
@@ -191,7 +459,7 @@ public class FormValidatorService : IFormValidatorService
     private static bool TryConvertToDouble(object? val, out double result)
     {
         result = 0;
-        if (val == null) return false;
+        if (val == null || val is bool) return false;
 
         if (val is double d)
         {
@@ -211,9 +479,29 @@ public class FormValidatorService : IFormValidatorService
             return true;
         }
 
-        if (val is JsonElement el && el.ValueKind == JsonValueKind.Number)
+        if (val is decimal m)
         {
-            return el.TryGetDouble(out result);
+            result = (double)m;
+            return true;
+        }
+
+        if (val is float f)
+        {
+            result = f;
+            return true;
+        }
+
+        if (val is JsonElement el)
+        {
+            if (el.ValueKind == JsonValueKind.Number)
+            {
+                return el.TryGetDouble(out result);
+            }
+            if (el.ValueKind == JsonValueKind.String)
+            {
+                return double.TryParse(el.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out result);
+            }
+            return false;
         }
 
         return double.TryParse(val.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out result);
@@ -222,7 +510,7 @@ public class FormValidatorService : IFormValidatorService
     private static bool TryConvertToDateTime(object? val, out DateTime result)
     {
         result = default;
-        if (val == null) return false;
+        if (val == null || val is bool) return false;
 
         if (val is DateTime dt)
         {
@@ -230,9 +518,19 @@ public class FormValidatorService : IFormValidatorService
             return true;
         }
 
-        if (val is JsonElement el && el.ValueKind == JsonValueKind.String)
+        if (val is DateTimeOffset dto)
         {
-            return el.TryGetDateTime(out result);
+            result = dto.UtcDateTime;
+            return true;
+        }
+
+        if (val is JsonElement el)
+        {
+            if (el.ValueKind == JsonValueKind.String)
+            {
+                return el.TryGetDateTime(out result) || DateTime.TryParse(el.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out result);
+            }
+            return false;
         }
 
         return DateTime.TryParse(val.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out result);
