@@ -95,6 +95,8 @@ public class FormSubmissionService : IFormSubmissionService
         {
             Id = Guid.NewGuid(),
             FormDefinitionId = formId,
+            FormVersion = form.Version,
+            SchemaSnapshotJson = form.SchemaJson,
             CompanyId = companyId,
             SubmittedById = currentUserId,
             DataJson = JsonSerializer.Serialize(dto.Data ?? new Dictionary<string, object?>(), JsonOptions),
@@ -392,6 +394,34 @@ public class FormSubmissionService : IFormSubmissionService
             data = new Dictionary<string, object?>();
         }
 
+        List<FormFieldDto> schemaSnapshot;
+        if (!string.IsNullOrWhiteSpace(submission.SchemaSnapshotJson))
+        {
+            try
+            {
+                schemaSnapshot = JsonSerializer.Deserialize<List<FormFieldDto>>(submission.SchemaSnapshotJson, JsonOptions) ?? new List<FormFieldDto>();
+            }
+            catch
+            {
+                schemaSnapshot = new List<FormFieldDto>();
+            }
+        }
+        else if (submission.FormDefinition != null && !string.IsNullOrWhiteSpace(submission.FormDefinition.SchemaJson))
+        {
+            try
+            {
+                schemaSnapshot = JsonSerializer.Deserialize<List<FormFieldDto>>(submission.FormDefinition.SchemaJson, JsonOptions) ?? new List<FormFieldDto>();
+            }
+            catch
+            {
+                schemaSnapshot = new List<FormFieldDto>();
+            }
+        }
+        else
+        {
+            schemaSnapshot = new List<FormFieldDto>();
+        }
+
         return new FormSubmissionDto
         {
             Id = submission.Id,
@@ -401,6 +431,8 @@ public class FormSubmissionService : IFormSubmissionService
             CompanyId = submission.CompanyId,
             SubmittedById = submission.SubmittedById,
             SubmittedByName = submission.SubmittedBy?.Name ?? submission.SubmittedBy?.Email,
+            FormVersion = submission.FormVersion,
+            SchemaSnapshot = schemaSnapshot,
             Data = data,
             Status = submission.Status,
             CurrentStepOrder = submission.CurrentStepOrder,

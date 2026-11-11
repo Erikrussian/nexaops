@@ -40,6 +40,12 @@ public class ChangeFormStatusDto
     public FormStatus Status { get; set; }
 }
 
+public class CloneFormDto
+{
+    public string? NewTitle { get; set; }
+    public string? NewCode { get; set; }
+}
+
 public class FormDefinitionDto
 {
     public Guid Id { get; set; }

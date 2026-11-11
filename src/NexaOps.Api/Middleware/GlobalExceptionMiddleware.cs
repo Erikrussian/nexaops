@@ -9,6 +9,12 @@ public class GlobalExceptionMiddleware
     private readonly RequestDelegate _next;
     private readonly ILogger<GlobalExceptionMiddleware> _logger;
 
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     public GlobalExceptionMiddleware(RequestDelegate _next, ILogger<GlobalExceptionMiddleware> logger)
     {
         this._next = _next;
@@ -62,7 +68,7 @@ public class GlobalExceptionMiddleware
 
         problemDetails.Extensions["traceId"] = context.TraceIdentifier;
 
-        var json = JsonSerializer.Serialize(problemDetails);
+        var json = JsonSerializer.Serialize(problemDetails, JsonOptions);
         await context.Response.WriteAsync(json);
     }
 }

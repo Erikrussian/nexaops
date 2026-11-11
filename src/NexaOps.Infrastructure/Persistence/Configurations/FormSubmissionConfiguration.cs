@@ -16,6 +16,12 @@ public class FormSubmissionConfiguration : IEntityTypeConfiguration<FormSubmissi
             .HasColumnType("jsonb")
             .IsRequired();
 
+        builder.Property(s => s.FormVersion)
+            .HasDefaultValue(1);
+
+        builder.Property(s => s.SchemaSnapshotJson)
+            .HasColumnType("jsonb");
+
         builder.Property(s => s.Status)
             .IsRequired();
 

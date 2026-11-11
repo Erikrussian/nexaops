@@ -1275,4 +1275,431 @@ public class SecurityRemediationSprint2Tests : IClassFixture<CustomWebApplicatio
     }
 
     #endregion
+
+    #region NX-DATA-002: Published Form Schema Versioning
+
+    [Fact]
+    public async Task NX_DATA_002_NewSubmission_SnapshotsApplicableSchemaAndVersion()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("SnapSchema");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "score", Name = "score", Label = "Điểm", Type = FormFieldType.Number, Required = true },
+            new() { Id = "notes", Name = "notes", Label = "Ghi chú", Type = FormFieldType.Text, Required = false }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields, "Evaluation Form");
+
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["score"] = 95, ["notes"] = "Xuất sắc" }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+        Assert.Equal(HttpStatusCode.Created, submitRes.StatusCode);
+
+        var subDto = await submitRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.NotNull(subDto);
+        Assert.Equal(1, subDto.FormVersion);
+        Assert.NotNull(subDto.SchemaSnapshot);
+        Assert.Equal(2, subDto.SchemaSnapshot.Count);
+        Assert.Contains(subDto.SchemaSnapshot, f => f.Name == "score");
+        Assert.Contains(subDto.SchemaSnapshot, f => f.Name == "notes");
+    }
+
+    [Fact]
+    public async Task NX_DATA_002_PublishedFormWithSubmissions_RejectsInPlaceSchemaModification()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("RejectInPlace");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "receiptUrl", Name = "receiptUrl", Label = "Hóa đơn", Type = FormFieldType.Text, Required = true },
+            new() { Id = "amount", Name = "amount", Label = "Số tiền", Type = FormFieldType.Number, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields, "Expense Report");
+
+        // Create a submission
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["receiptUrl"] = "https://cdn.example.com/receipt.pdf", ["amount"] = 500 }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+        Assert.Equal(HttpStatusCode.Created, submitRes.StatusCode);
+
+        // Attempt in-place modification of fields (deleting amount and adding budgetCategory)
+        var alteredFields = new List<FormFieldDto>
+        {
+            new() { Id = "receiptUrl", Name = "receiptUrl", Label = "Hóa đơn", Type = FormFieldType.Text, Required = true },
+            new() { Id = "budgetCategory", Name = "budgetCategory", Label = "Danh mục ngân sách", Type = FormFieldType.Select, Required = true, Options = new() { "Travel", "Office" } }
+        };
+        var updateMsg = new HttpRequestMessage(HttpMethod.Put, $"/companies/{companyId}/forms/{form.Id}")
+        {
+            Content = JsonContent.Create(new UpdateFormDto
+            {
+                Title = "Expense Report (Modified)",
+                Fields = alteredFields
+            })
+        };
+        updateMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var updateRes = await _client.SendAsync(updateMsg);
+
+        Assert.Equal(HttpStatusCode.BadRequest, updateRes.StatusCode);
+        var responseBody = await updateRes.Content.ReadAsStringAsync();
+        Assert.Contains("Không thể chỉnh sửa cấu trúc trường", responseBody);
+    }
+
+    [Fact]
+    public async Task NX_DATA_002_PublishedFormWithSubmissions_AllowsMetadataUpdate()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("MetaUpdate");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "feedback", Name = "feedback", Label = "Phản hồi", Type = FormFieldType.Text, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields, "Survey 2026");
+
+        // Submit once
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["feedback"] = "Great work!" }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+        Assert.Equal(HttpStatusCode.Created, submitRes.StatusCode);
+
+        // Update metadata without altering fields (fields identical or null)
+        var updateMetaMsg = new HttpRequestMessage(HttpMethod.Put, $"/companies/{companyId}/forms/{form.Id}")
+        {
+            Content = JsonContent.Create(new UpdateFormDto
+            {
+                Title = "Survey 2026 Updated Title",
+                Description = "Updated survey description for all employees",
+                Fields = fields // unchanged fields
+            })
+        };
+        updateMetaMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var updateMetaRes = await _client.SendAsync(updateMetaMsg);
+
+        Assert.Equal(HttpStatusCode.OK, updateMetaRes.StatusCode);
+        var updatedForm = await updateMetaRes.Content.ReadFromJsonAsync<FormDefinitionDto>(JsonOptions);
+        Assert.NotNull(updatedForm);
+        Assert.Equal("Survey 2026 Updated Title", updatedForm.Title);
+        Assert.Equal("Updated survey description for all employees", updatedForm.Description);
+    }
+
+    [Fact]
+    public async Task NX_DATA_002_PublishedFormWithoutSubmissions_AllowsSchemaUpdate()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("NoSubUpdate");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "field1", Name = "field1", Label = "Trường 1", Type = FormFieldType.Text, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields, "Zero Submissions Form");
+
+        // Since 0 submissions exist, updating fields is permitted
+        var newFields = new List<FormFieldDto>
+        {
+            new() { Id = "field1", Name = "field1", Label = "Trường 1", Type = FormFieldType.Text, Required = true },
+            new() { Id = "field2", Name = "field2", Label = "Trường 2", Type = FormFieldType.Number, Required = false }
+        };
+        var updateMsg = new HttpRequestMessage(HttpMethod.Put, $"/companies/{companyId}/forms/{form.Id}")
+        {
+            Content = JsonContent.Create(new UpdateFormDto
+            {
+                Title = form.Title,
+                Fields = newFields
+            })
+        };
+        updateMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var updateRes = await _client.SendAsync(updateMsg);
+
+        Assert.Equal(HttpStatusCode.OK, updateRes.StatusCode);
+        var updatedForm = await updateRes.Content.ReadFromJsonAsync<FormDefinitionDto>(JsonOptions);
+        Assert.NotNull(updatedForm);
+        Assert.Equal(2, updatedForm.Fields.Count);
+        Assert.Equal(2, updatedForm.Version);
+    }
+
+    [Fact]
+    public async Task NX_DATA_002_DraftForm_AllowsSchemaUpdate()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("DraftUpdate");
+        var createMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms")
+        {
+            Content = JsonContent.Create(new CreateFormDto
+            {
+                Title = "Draft Form Test",
+                Code = "DFT_" + Guid.NewGuid().ToString("N")[..6],
+                Fields = new List<FormFieldDto>
+                {
+                    new() { Id = "stepA", Name = "stepA", Label = "Bước A", Type = FormFieldType.Text, Required = true }
+                }
+            })
+        };
+        createMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var createRes = await _client.SendAsync(createMsg);
+        var form = await createRes.Content.ReadFromJsonAsync<FormDefinitionDto>(JsonOptions);
+
+        var updateMsg = new HttpRequestMessage(HttpMethod.Put, $"/companies/{companyId}/forms/{form!.Id}")
+        {
+            Content = JsonContent.Create(new UpdateFormDto
+            {
+                Title = "Draft Form Test (Revised)",
+                Fields = new List<FormFieldDto>
+                {
+                    new() { Id = "stepA", Name = "stepA", Label = "Bước A", Type = FormFieldType.Text, Required = true },
+                    new() { Id = "stepB", Name = "stepB", Label = "Bước B", Type = FormFieldType.Text, Required = true }
+                }
+            })
+        };
+        updateMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var updateRes = await _client.SendAsync(updateMsg);
+
+        Assert.Equal(HttpStatusCode.OK, updateRes.StatusCode);
+        var updatedForm = await updateRes.Content.ReadFromJsonAsync<FormDefinitionDto>(JsonOptions);
+        Assert.NotNull(updatedForm);
+        Assert.Equal(2, updatedForm.Fields.Count);
+    }
+
+    [Fact]
+    public async Task NX_DATA_002_ArchivedForm_RejectsSchemaUpdate()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("ArchivedUpdate");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "oldData", Name = "oldData", Label = "Dữ liệu cũ", Type = FormFieldType.Text, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields, "Archived Form Test");
+
+        // Archive the form
+        var archiveMsg = new HttpRequestMessage(HttpMethod.Patch, $"/companies/{companyId}/forms/{form.Id}/status")
+        {
+            Content = JsonContent.Create(new ChangeFormStatusDto { Status = FormStatus.Archived })
+        };
+        archiveMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var archiveRes = await _client.SendAsync(archiveMsg);
+        Assert.Equal(HttpStatusCode.OK, archiveRes.StatusCode);
+
+        // Attempt updating schema on archived form
+        var updateMsg = new HttpRequestMessage(HttpMethod.Put, $"/companies/{companyId}/forms/{form.Id}")
+        {
+            Content = JsonContent.Create(new UpdateFormDto
+            {
+                Title = "Archived Form Attempt",
+                Fields = new List<FormFieldDto>
+                {
+                    new() { Id = "newData", Name = "newData", Label = "Dữ liệu mới", Type = FormFieldType.Text, Required = true }
+                }
+            })
+        };
+        updateMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var updateRes = await _client.SendAsync(updateMsg);
+
+        Assert.Equal(HttpStatusCode.BadRequest, updateRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task NX_DATA_002_ClonePublishedForm_CreatesNewDraftWithUniqueCode()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("CloneForm");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "item", Name = "item", Label = "Mặt hàng", Type = FormFieldType.Text, Required = true },
+            new() { Id = "cost", Name = "cost", Label = "Chi phí", Type = FormFieldType.Number, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields, "Procurement Request");
+
+        // Clone the form
+        var cloneMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/clone")
+        {
+            Content = JsonContent.Create(new CloneFormDto
+            {
+                NewTitle = "Procurement Request 2027",
+                NewCode = "PROC_2027"
+            })
+        };
+        cloneMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var cloneRes = await _client.SendAsync(cloneMsg);
+
+        Assert.Equal(HttpStatusCode.Created, cloneRes.StatusCode);
+        var clonedForm = await cloneRes.Content.ReadFromJsonAsync<FormDefinitionDto>(JsonOptions);
+        Assert.NotNull(clonedForm);
+        Assert.NotEqual(form.Id, clonedForm.Id);
+        Assert.Equal("Procurement Request 2027", clonedForm.Title);
+        Assert.Equal("PROC_2027", clonedForm.Code);
+        Assert.Equal(FormStatus.Draft, clonedForm.Status);
+        Assert.Equal(2, clonedForm.Fields.Count);
+    }
+
+    [Fact]
+    public async Task NX_DATA_002_EditingClonedForm_DoesNotAlterHistoricalSubmissions()
+    {
+        var (token, companyId, _) = await SetupCompanyAndOwnerAsync("HistoricalPreserve");
+        var fieldsV1 = new List<FormFieldDto>
+        {
+            new() { Id = "legacyField", Name = "legacyField", Label = "Trường Cũ", Type = FormFieldType.Text, Required = true }
+        };
+        var formV1 = await CreatePublishedFormWithSchemaAsync(token, companyId, fieldsV1, "Original V1");
+
+        // Submit S1 on formV1
+        var submitV1Msg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{formV1.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["legacyField"] = "Giá trị lịch sử" }
+            })
+        };
+        submitV1Msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitV1Res = await _client.SendAsync(submitV1Msg);
+        Assert.Equal(HttpStatusCode.Created, submitV1Res.StatusCode);
+        var subV1 = await submitV1Res.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+
+        // Clone to create V2
+        var cloneMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{formV1.Id}/clone")
+        {
+            Content = JsonContent.Create(new CloneFormDto { NewTitle = "Original V2" })
+        };
+        cloneMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var cloneRes = await _client.SendAsync(cloneMsg);
+        var formV2 = await cloneRes.Content.ReadFromJsonAsync<FormDefinitionDto>(JsonOptions);
+
+        // Update fields of draft V2
+        var fieldsV2 = new List<FormFieldDto>
+        {
+            new() { Id = "newField", Name = "newField", Label = "Trường Mới", Type = FormFieldType.Text, Required = true }
+        };
+        var updateV2Msg = new HttpRequestMessage(HttpMethod.Put, $"/companies/{companyId}/forms/{formV2!.Id}")
+        {
+            Content = JsonContent.Create(new UpdateFormDto { Title = formV2.Title, Fields = fieldsV2 })
+        };
+        updateV2Msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await _client.SendAsync(updateV2Msg);
+
+        // Publish formV2
+        var pubV2Msg = new HttpRequestMessage(HttpMethod.Patch, $"/companies/{companyId}/forms/{formV2.Id}/status")
+        {
+            Content = JsonContent.Create(new ChangeFormStatusDto { Status = FormStatus.Published })
+        };
+        pubV2Msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await _client.SendAsync(pubV2Msg);
+
+        // Submit S2 on formV2
+        var submitV2Msg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{formV2.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["newField"] = "Giá trị mới" }
+            })
+        };
+        submitV2Msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitV2Res = await _client.SendAsync(submitV2Msg);
+        Assert.Equal(HttpStatusCode.Created, submitV2Res.StatusCode);
+        var subV2 = await submitV2Res.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+
+        // Verify S1 retains its original V1 schema snapshot
+        var getS1Msg = new HttpRequestMessage(HttpMethod.Get, $"/companies/{companyId}/submissions/{subV1!.Id}");
+        getS1Msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var getS1Res = await _client.SendAsync(getS1Msg);
+        var retrievedS1 = await getS1Res.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.NotNull(retrievedS1);
+        Assert.Single(retrievedS1.SchemaSnapshot);
+        Assert.Equal("legacyField", retrievedS1.SchemaSnapshot[0].Name);
+
+        // Verify S2 has its V2 schema snapshot
+        var getS2Msg = new HttpRequestMessage(HttpMethod.Get, $"/companies/{companyId}/submissions/{subV2!.Id}");
+        getS2Msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var getS2Res = await _client.SendAsync(getS2Msg);
+        var retrievedS2 = await getS2Res.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.NotNull(retrievedS2);
+        Assert.Single(retrievedS2.SchemaSnapshot);
+        Assert.Equal("newField", retrievedS2.SchemaSnapshot[0].Name);
+    }
+
+    [Fact]
+    public async Task NX_DATA_002_HistoricalSubmissionsWithoutSnapshot_FallbacksSafely()
+    {
+        var (token, companyId, userId) = await SetupCompanyAndOwnerAsync("LegacyFallback");
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "legacyCol", Name = "legacyCol", Label = "Cột cũ", Type = FormFieldType.Text, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields, "Legacy Form");
+
+        // Manually insert submission without SchemaSnapshotJson
+        var subId = Guid.NewGuid();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var sub = new FormSubmission
+            {
+                Id = subId,
+                FormDefinitionId = form.Id,
+                CompanyId = companyId,
+                SubmittedById = userId,
+                DataJson = JsonSerializer.Serialize(new Dictionary<string, object?> { ["legacyCol"] = "Sample" }, JsonOptions),
+                Status = SubmissionStatus.Approved,
+                FormVersion = 1,
+                SchemaSnapshotJson = null, // Historical record prior to snapshotting
+                CreatedAt = DateTime.UtcNow.AddMonths(-3),
+                UpdatedAt = DateTime.UtcNow.AddMonths(-3)
+            };
+            db.FormSubmissions.Add(sub);
+            await db.SaveChangesAsync();
+        }
+
+        // Query submission through API
+        var getMsg = new HttpRequestMessage(HttpMethod.Get, $"/companies/{companyId}/submissions/{subId}");
+        getMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var getRes = await _client.SendAsync(getMsg);
+
+        Assert.Equal(HttpStatusCode.OK, getRes.StatusCode);
+        var subDto = await getRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.NotNull(subDto);
+        Assert.NotNull(subDto.SchemaSnapshot);
+        Assert.Single(subDto.SchemaSnapshot);
+        Assert.Equal("legacyCol", subDto.SchemaSnapshot[0].Name);
+    }
+
+    [Fact]
+    public async Task NX_DATA_002_CrossTenantCloneOrAccess_IsRejected()
+    {
+        var (tokenA, companyIdA, _) = await SetupCompanyAndOwnerAsync("TenantAForms");
+        var (tokenB, companyIdB, _) = await SetupCompanyAndOwnerAsync("TenantBForms");
+
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "secretFormula", Name = "secretFormula", Label = "Bí mật", Type = FormFieldType.Text, Required = true }
+        };
+        var formA = await CreatePublishedFormWithSchemaAsync(tokenA, companyIdA, fields, "Confidential Form A");
+
+        // User B attempts to clone Company A's form via Company B endpoint
+        var cloneCrossMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyIdB}/forms/{formA.Id}/clone")
+        {
+            Content = JsonContent.Create(new CloneFormDto { NewTitle = "Stolen Form" })
+        };
+        cloneCrossMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenB);
+        var cloneCrossRes = await _client.SendAsync(cloneCrossMsg);
+        Assert.Equal(HttpStatusCode.NotFound, cloneCrossRes.StatusCode);
+
+        // User B attempts to clone directly via Company A endpoint
+        var cloneDirectMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyIdA}/forms/{formA.Id}/clone")
+        {
+            Content = JsonContent.Create(new CloneFormDto { NewTitle = "Stolen Direct Form" })
+        };
+        cloneDirectMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenB);
+        var cloneDirectRes = await _client.SendAsync(cloneDirectMsg);
+        Assert.Equal(HttpStatusCode.Forbidden, cloneDirectRes.StatusCode);
+    }
+
+    #endregion
 }

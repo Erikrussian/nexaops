@@ -263,6 +263,8 @@ export interface FormSubmission {
   createdAt: string
   updatedAt: string
   approvalSteps?: SubmissionApprovalStep[]
+  formVersion?: number
+  schemaSnapshot?: FormField[]
 }
 
 export interface DailySubmissionMetric {

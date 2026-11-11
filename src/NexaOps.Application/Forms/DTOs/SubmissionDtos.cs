@@ -22,6 +22,8 @@ public class FormSubmissionDto
     public Guid CompanyId { get; set; }
     public Guid SubmittedById { get; set; }
     public string? SubmittedByName { get; set; }
+    public int FormVersion { get; set; } = 1;
+    public List<FormFieldDto> SchemaSnapshot { get; set; } = new();
     public Dictionary<string, object?> Data { get; set; } = new();
     public SubmissionStatus Status { get; set; }
     public int CurrentStepOrder { get; set; } = 1;

@@ -12,6 +12,8 @@ public class FormSubmission
     public Guid SubmittedById { get; set; }
     public User? SubmittedBy { get; set; }
     public string DataJson { get; set; } = "{}";
+    public int FormVersion { get; set; } = 1;
+    public string? SchemaSnapshotJson { get; set; }
     public SubmissionStatus Status { get; set; } = SubmissionStatus.Pending;
     public int CurrentStepOrder { get; set; } = 1;
     public string? ReviewNotes { get; set; }

@@ -15,6 +15,7 @@ public interface IFormService
     Task<FormDefinitionDto> GetByCodeAsync(Guid companyId, string code, CancellationToken cancellationToken = default);
     Task<List<FormDefinitionDto>> ListAsync(Guid companyId, Guid? departmentId = null, FormStatus? status = null, CancellationToken cancellationToken = default);
     Task<FormDefinitionDto> UpdateAsync(Guid companyId, Guid formId, UpdateFormDto dto, CancellationToken cancellationToken = default);
+    Task<FormDefinitionDto> CloneAsync(Guid companyId, Guid formId, CloneFormDto? dto = null, CancellationToken cancellationToken = default);
     Task<FormDefinitionDto> ChangeStatusAsync(Guid companyId, Guid formId, FormStatus newStatus, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid companyId, Guid formId, CancellationToken cancellationToken = default);
 }
@@ -195,8 +196,32 @@ public class FormService : IFormService
 
         if (dto.Fields != null)
         {
-            form.SchemaJson = JsonSerializer.Serialize(dto.Fields, JsonOptions);
-            form.Version++;
+            if (form.Status == FormStatus.Archived)
+            {
+                throw new InvalidOperationException("Không thể chỉnh sửa cấu trúc của biểu mẫu đã lưu trữ (Archived)");
+            }
+
+            if (form.Status == FormStatus.Published)
+            {
+                var hasSubmissions = await _context.FormSubmissions
+                    .AnyAsync(s => s.FormDefinitionId == formId, cancellationToken);
+
+                if (hasSubmissions)
+                {
+                    var newSchemaJson = JsonSerializer.Serialize(dto.Fields, JsonOptions);
+                    if (!string.Equals(form.SchemaJson, newSchemaJson, StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException("Không thể chỉnh sửa cấu trúc trường của biểu mẫu đã xuất bản và đã có lượt nộp. Vui lòng tạo bản sao (clone) hoặc tạo phiên bản mới.");
+                    }
+                }
+            }
+
+            var updatedSchemaJson = JsonSerializer.Serialize(dto.Fields, JsonOptions);
+            if (!string.Equals(form.SchemaJson, updatedSchemaJson, StringComparison.Ordinal))
+            {
+                form.SchemaJson = updatedSchemaJson;
+                form.Version++;
+            }
         }
 
         form.UpdatedAt = DateTime.UtcNow;
@@ -204,6 +229,57 @@ public class FormService : IFormService
         await _context.SaveChangesAsync(cancellationToken);
 
         return await GetByIdAsync(companyId, form.Id, cancellationToken);
+    }
+
+    public async Task<FormDefinitionDto> CloneAsync(Guid companyId, Guid formId, CloneFormDto? dto = null, CancellationToken cancellationToken = default)
+    {
+        await _companyAccessService.EnsureCanManageFormsAsync(companyId, cancellationToken);
+        var currentUserId = _currentUserService.UserId!.Value;
+
+        var sourceForm = await _context.FormDefinitions
+            .FirstOrDefaultAsync(f => f.Id == formId && f.CompanyId == companyId, cancellationToken);
+
+        if (sourceForm == null)
+        {
+            throw new KeyNotFoundException($"Không tìm thấy biểu mẫu với ID: {formId}");
+        }
+
+        var targetTitle = !string.IsNullOrWhiteSpace(dto?.NewTitle)
+            ? dto.NewTitle.Trim()
+            : $"{sourceForm.Title} (v{sourceForm.Version + 1})";
+
+        var baseCode = !string.IsNullOrWhiteSpace(dto?.NewCode)
+            ? dto.NewCode.Trim().ToUpperInvariant()
+            : $"{sourceForm.Code}_V{sourceForm.Version + 1}";
+
+        // Ensure Code uniqueness within the company
+        var finalCode = baseCode;
+        int suffix = 1;
+        while (await _context.FormDefinitions.AnyAsync(f => f.CompanyId == companyId && f.Code == finalCode, cancellationToken))
+        {
+            finalCode = $"{baseCode}_{suffix++}";
+        }
+
+        var newForm = new FormDefinition
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            DepartmentId = sourceForm.DepartmentId,
+            Title = targetTitle,
+            Code = finalCode,
+            Description = sourceForm.Description,
+            Status = FormStatus.Draft,
+            Version = 1,
+            SchemaJson = sourceForm.SchemaJson,
+            CreatedById = currentUserId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _context.FormDefinitions.Add(newForm);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return await GetByIdAsync(companyId, newForm.Id, cancellationToken);
     }
 
     public async Task<FormDefinitionDto> ChangeStatusAsync(Guid companyId, Guid formId, FormStatus newStatus, CancellationToken cancellationToken = default)

@@ -432,6 +432,11 @@ namespace NexaOps.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("FormDefinitionId")
                         .HasColumnType("uuid");
 
+                    b.Property<int>("FormVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
                     b.Property<string>("ReviewNotes")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
@@ -441,6 +446,9 @@ namespace NexaOps.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid?>("ReviewedById")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("SchemaSnapshotJson")
+                        .HasColumnType("jsonb");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
@@ -585,6 +593,14 @@ namespace NexaOps.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsEscalated")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<int>("OrderIndex")
                         .HasColumnType("integer");
 
@@ -614,6 +630,9 @@ namespace NexaOps.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid>("SubmissionId")
                         .HasColumnType("uuid");
+
+                    b.Property<int?>("TimeLimitHours")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");

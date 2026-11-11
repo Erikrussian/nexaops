@@ -977,7 +977,9 @@ export function FormSubmissionsInbox({
                       </thead>
                       <tbody>
                         {Object.entries(activeReviewSubmission.data || {}).map(([key, val]) => {
-                          const matchedField = activeFormDef?.fields?.find((f) => f.name === key)
+                          const matchedField =
+                            activeReviewSubmission.schemaSnapshot?.find((f) => f.name === key || f.id === key) ||
+                            activeFormDef?.fields?.find((f) => f.name === key || f.id === key)
                           const label = matchedField?.label || key
 
                           let displayVal: React.ReactNode = String(val)

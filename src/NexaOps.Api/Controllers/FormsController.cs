@@ -113,6 +113,24 @@ public class FormsController : ControllerBase
     }
 
     /// <summary>
+    /// POST /companies/{companyId}/forms/{formId}/clone - Nhân bản biểu mẫu để tạo bản sửa đổi/phiên bản mới
+    /// </summary>
+    [HttpPost("companies/{companyId:guid}/forms/{formId:guid}/clone")]
+    [ProducesResponseType(typeof(FormDefinitionDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<FormDefinitionDto>> Clone(
+        [FromRoute] Guid companyId,
+        [FromRoute] Guid formId,
+        [FromBody] CloneFormDto? dto,
+        CancellationToken cancellationToken)
+    {
+        var result = await _formService.CloneAsync(companyId, formId, dto, cancellationToken);
+        return CreatedAtAction(nameof(FindById), new { companyId, formId = result.Id }, result);
+    }
+
+    /// <summary>
     /// PATCH /companies/{companyId}/forms/{formId}/status - Thay đổi trạng thái biểu mẫu (Draft, Published, Archived)
     /// </summary>
     [HttpPatch("companies/{companyId:guid}/forms/{formId:guid}/status")]
