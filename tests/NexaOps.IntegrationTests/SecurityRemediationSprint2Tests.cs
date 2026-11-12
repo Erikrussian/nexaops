@@ -1702,4 +1702,414 @@ public class SecurityRemediationSprint2Tests : IClassFixture<CustomWebApplicatio
     }
 
     #endregion
+
+    #region Sprint 2 Cross-Module Compatibility & End-to-End Workflows
+
+    [Fact]
+    public async Task Sprint2_DepartmentReparenting_PreservesWorkflowDepartmentApproverResolution()
+    {
+        var (ownerToken, companyId, _) = await SetupCompanyAndOwnerAsync("DeptWf");
+        var (mgrToken, mgrUserId, _) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Manager, "MgrDept");
+        var (memberToken, memberUserId, _) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Member, "MemDept");
+
+        // Create Parent Department and Child Department with Manager
+        var parentDept = await CreateDepartmentAsync(ownerToken, companyId, "Headquarters");
+        var childDeptReq = new CreateDepartmentRequest
+        {
+            Name = "Engineering",
+            ParentId = parentDept.Id,
+            ManagerId = mgrUserId
+        };
+        var childDeptMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/departments")
+        {
+            Content = JsonContent.Create(childDeptReq)
+        };
+        childDeptMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var childDeptRes = await _client.SendAsync(childDeptMsg);
+        var childDept = await childDeptRes.Content.ReadFromJsonAsync<DepartmentResponse>(JsonOptions);
+
+        // Reparent Engineering to root using Guid.Empty
+        var reparentMsg = new HttpRequestMessage(HttpMethod.Patch, $"/departments/{childDept!.Id}")
+        {
+            Content = JsonContent.Create(new UpdateDepartmentRequest
+            {
+                Name = "Engineering Autonomous",
+                ParentId = Guid.Empty,
+                ManagerId = mgrUserId
+            })
+        };
+        reparentMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var reparentRes = await _client.SendAsync(reparentMsg);
+        Assert.Equal(HttpStatusCode.OK, reparentRes.StatusCode);
+
+        // Create form assigned to Engineering department with DepartmentManager approval step
+        var createFormMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms")
+        {
+            Content = JsonContent.Create(new CreateFormDto
+            {
+                Title = "Eng Purchase Request",
+                Code = "ENG_PR_" + Guid.NewGuid().ToString("N")[..6],
+                DepartmentId = childDept.Id,
+                Fields = new List<FormFieldDto>
+                {
+                    new() { Id = "toolName", Name = "toolName", Label = "Tên công cụ", Type = FormFieldType.Text, Required = true }
+                }
+            })
+        };
+        createFormMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var formRes = await _client.SendAsync(createFormMsg);
+        var form = await formRes.Content.ReadFromJsonAsync<FormDefinitionDto>(JsonOptions);
+
+        // Publish Form
+        var pubMsg = new HttpRequestMessage(HttpMethod.Patch, $"/companies/{companyId}/forms/{form!.Id}/status")
+        {
+            Content = JsonContent.Create(new ChangeFormStatusDto { Status = FormStatus.Published })
+        };
+        pubMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        await _client.SendAsync(pubMsg);
+
+        // Configure workflow with DepartmentManager step
+        var wfMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/workflow")
+        {
+            Content = JsonContent.Create(new CreateOrUpdateWorkflowDto
+            {
+                Name = "Eng Dept Approval",
+                IsActive = true,
+                Steps = new List<CreateOrUpdateApprovalStepDto>
+                {
+                    new()
+                    {
+                        OrderIndex = 1,
+                        Name = "Manager Approval",
+                        StepType = ApprovalStepType.DepartmentManager,
+                        AllowSelfApproval = false
+                    }
+                }
+            })
+        };
+        wfMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        await _client.SendAsync(wfMsg);
+
+        // Member submits form
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["toolName"] = "JetBrains Rider" }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memberToken);
+        var submitRes = await _client.SendAsync(submitMsg);
+        Assert.Equal(HttpStatusCode.Created, submitRes.StatusCode);
+        var subDto = await submitRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+
+        // Department manager approves the step -> Succeeds
+        var approveMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/submissions/{subDto!.Id}/steps/1/process")
+        {
+            Content = JsonContent.Create(new StepApprovalActionDto
+            {
+                Status = ApprovalStepStatus.Approved,
+                ReviewNotes = "Approved by autonomous department manager"
+            })
+        };
+        approveMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", mgrToken);
+        var approveRes = await _client.SendAsync(approveMsg);
+        Assert.Equal(HttpStatusCode.OK, approveRes.StatusCode);
+
+        // Check submission is now Approved
+        var getMsg = new HttpRequestMessage(HttpMethod.Get, $"/companies/{companyId}/submissions/{subDto.Id}");
+        getMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memberToken);
+        var getRes = await _client.SendAsync(getMsg);
+        var finalSub = await getRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.Equal(SubmissionStatus.Approved, finalSub!.Status);
+    }
+
+    [Fact]
+    public async Task Sprint2_SubmissionWorkflowLifecycle_PreservesSchemaSnapshotAcrossAllApprovalSteps()
+    {
+        var (ownerToken, companyId, _) = await SetupCompanyAndOwnerAsync("SnapWfLifecycle");
+        var (mgrToken, _, _) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Manager, "MgrSnap");
+        var (memToken, _, _) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Member, "MemSnap");
+
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "projectTitle", Name = "projectTitle", Label = "Dự án", Type = FormFieldType.Text, Required = true },
+            new() { Id = "estimatedBudget", Name = "estimatedBudget", Label = "Ngân sách", Type = FormFieldType.Number, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(ownerToken, companyId, fields, "Project Proposal");
+
+        // Setup 2-step workflow: Step 1 (Manager Role), Step 2 (CompanyOwner StepType)
+        var wfMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/workflow")
+        {
+            Content = JsonContent.Create(new CreateOrUpdateWorkflowDto
+            {
+                Name = "Two Step Sequential",
+                IsActive = true,
+                Steps = new List<CreateOrUpdateApprovalStepDto>
+                {
+                    new() { OrderIndex = 1, Name = "Manager Review", StepType = ApprovalStepType.Role, ApproverRole = MemberRole.Manager, AllowSelfApproval = false },
+                    new() { OrderIndex = 2, Name = "Owner Approval", StepType = ApprovalStepType.CompanyOwner, AllowSelfApproval = false }
+                }
+            })
+        };
+        wfMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        await _client.SendAsync(wfMsg);
+
+        // Submitter submits proposal
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["projectTitle"] = "AI Infrastructure", ["estimatedBudget"] = 50000 }
+            })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memToken);
+        var submitRes = await _client.SendAsync(submitMsg);
+        Assert.Equal(HttpStatusCode.Created, submitRes.StatusCode);
+        var subDto = await submitRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+
+        Assert.Equal(1, subDto!.FormVersion);
+        Assert.Equal(2, subDto.SchemaSnapshot.Count);
+        Assert.Equal(SubmissionStatus.InReview, subDto.Status);
+
+        // Step 1: Manager approves
+        var step1Msg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/submissions/{subDto.Id}/steps/1/process")
+        {
+            Content = JsonContent.Create(new StepApprovalActionDto { Status = ApprovalStepStatus.Approved, ReviewNotes = "Manager Approved" })
+        };
+        step1Msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", mgrToken);
+        var step1Res = await _client.SendAsync(step1Msg);
+        Assert.Equal(HttpStatusCode.OK, step1Res.StatusCode);
+
+        // Verify after Step 1: SchemaSnapshot and FormVersion remain intact
+        var getStep1Msg = new HttpRequestMessage(HttpMethod.Get, $"/companies/{companyId}/submissions/{subDto.Id}");
+        getStep1Msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memToken);
+        var getStep1Res = await _client.SendAsync(getStep1Msg);
+        var subAfterStep1 = await getStep1Res.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.Equal(1, subAfterStep1!.FormVersion);
+        Assert.Equal(2, subAfterStep1.SchemaSnapshot.Count);
+        Assert.Equal(2, subAfterStep1.CurrentStepOrder);
+
+        // Step 2: Owner approves
+        var step2Msg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/submissions/{subDto.Id}/steps/2/process")
+        {
+            Content = JsonContent.Create(new StepApprovalActionDto { Status = ApprovalStepStatus.Approved, ReviewNotes = "Owner Approved" })
+        };
+        step2Msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var step2Res = await _client.SendAsync(step2Msg);
+        Assert.Equal(HttpStatusCode.OK, step2Res.StatusCode);
+
+        // Verify terminal state: Submission is Approved, SchemaSnapshot is permanently preserved
+        var finalGetMsg = new HttpRequestMessage(HttpMethod.Get, $"/companies/{companyId}/submissions/{subDto.Id}");
+        finalGetMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memToken);
+        var finalGetRes = await _client.SendAsync(finalGetMsg);
+        var finalSub = await finalGetRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.Equal(SubmissionStatus.Approved, finalSub!.Status);
+        Assert.Equal(1, finalSub.FormVersion);
+        Assert.Equal(2, finalSub.SchemaSnapshot.Count);
+        Assert.Contains(finalSub.SchemaSnapshot, f => f.Name == "projectTitle");
+        Assert.Contains(finalSub.SchemaSnapshot, f => f.Name == "estimatedBudget");
+    }
+
+    [Fact]
+    public async Task Sprint2_ClonedForm_CanAttachNewWorkflow_IndependentOfOriginalForm()
+    {
+        var (ownerToken, companyId, _) = await SetupCompanyAndOwnerAsync("CloneWfIndep");
+        var (memToken, _, _) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Member, "MemCloneWf");
+
+        // Form 1 with 1-step workflow
+        var (form1Id, _) = await CreateFormWithWorkflowAsync(ownerToken, companyId, new List<CreateOrUpdateApprovalStepDto>
+        {
+            new() { OrderIndex = 1, Name = "Quick Review", StepType = ApprovalStepType.CompanyOwner }
+        });
+
+        // Submit S1 to Form 1
+        var sub1Msg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form1Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto { Data = new Dictionary<string, object?> { ["notes"] = "S1 on Form 1" } })
+        };
+        sub1Msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memToken);
+        var sub1Res = await _client.SendAsync(sub1Msg);
+        var sub1 = await sub1Res.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.Single(sub1!.ApprovalSteps);
+
+        // Clone Form 1 to Form 2
+        var cloneMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form1Id}/clone")
+        {
+            Content = JsonContent.Create(new CloneFormDto { NewTitle = "Form 2 with Advanced Workflow" })
+        };
+        cloneMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var cloneRes = await _client.SendAsync(cloneMsg);
+        var form2 = await cloneRes.Content.ReadFromJsonAsync<FormDefinitionDto>(JsonOptions);
+
+        // Publish Form 2
+        var pub2Msg = new HttpRequestMessage(HttpMethod.Patch, $"/companies/{companyId}/forms/{form2!.Id}/status")
+        {
+            Content = JsonContent.Create(new ChangeFormStatusDto { Status = FormStatus.Published })
+        };
+        pub2Msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        await _client.SendAsync(pub2Msg);
+
+        // Attach new 2-step workflow to Form 2
+        var wf2Msg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form2.Id}/workflow")
+        {
+            Content = JsonContent.Create(new CreateOrUpdateWorkflowDto
+            {
+                Name = "Advanced Workflow Form 2",
+                IsActive = true,
+                Steps = new List<CreateOrUpdateApprovalStepDto>
+                {
+                    new() { OrderIndex = 1, Name = "Step 1", StepType = ApprovalStepType.CompanyOwner },
+                    new() { OrderIndex = 2, Name = "Step 2", StepType = ApprovalStepType.CompanyOwner }
+                }
+            })
+        };
+        wf2Msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        await _client.SendAsync(wf2Msg);
+
+        // Submit S2 to Form 2
+        var sub2Msg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form2.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto { Data = new Dictionary<string, object?> { ["notes"] = "S2 on Form 2" } })
+        };
+        sub2Msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memToken);
+        var sub2Res = await _client.SendAsync(sub2Msg);
+        var sub2 = await sub2Res.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+
+        // Assert S2 has 2 steps while S1 still has 1 step
+        Assert.Equal(2, sub2!.ApprovalSteps.Count);
+        Assert.Single(sub1.ApprovalSteps);
+    }
+
+    [Fact]
+    public async Task Sprint2_DelegatedStep_AdvancedByDelegate_UpdatesSubmissionStatusCorrectly()
+    {
+        var (ownerToken, companyId, _) = await SetupCompanyAndOwnerAsync("DelegateAdvance");
+        var (mgr1Token, mgr1UserId, _) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Manager, "Mgr1Del");
+        var (mgr2Token, mgr2UserId, _) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Manager, "Mgr2Del");
+        var (memToken, _, _) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Member, "MemDel");
+
+        var (formId, _) = await CreateFormWithWorkflowAsync(ownerToken, companyId, new List<CreateOrUpdateApprovalStepDto>
+        {
+            new()
+            {
+                OrderIndex = 1,
+                Name = "Manager Initial Step",
+                StepType = ApprovalStepType.SpecificUser,
+                SpecificApproverUserId = mgr1UserId,
+                AllowSelfApproval = false
+            }
+        });
+
+        // Submit
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{formId}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto { Data = new Dictionary<string, object?> { ["notes"] = "Delegation workflow test" } })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memToken);
+        var submitRes = await _client.SendAsync(submitMsg);
+        var subDto = await submitRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+
+        // Manager 1 delegates step 1 to Manager 2
+        var delMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/submissions/{subDto!.Id}/steps/1/delegate")
+        {
+            Content = JsonContent.Create(new DelegateStepDto { NewApproverUserId = mgr2UserId, Reason = "Leave of absence" })
+        };
+        delMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", mgr1Token);
+        var delRes = await _client.SendAsync(delMsg);
+        Assert.Equal(HttpStatusCode.OK, delRes.StatusCode);
+
+        // Manager 2 processes the approval
+        var procMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/submissions/{subDto.Id}/steps/1/process")
+        {
+            Content = JsonContent.Create(new StepApprovalActionDto { Status = ApprovalStepStatus.Approved, ReviewNotes = "Approved as delegated substitute" })
+        };
+        procMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", mgr2Token);
+        var procRes = await _client.SendAsync(procMsg);
+        Assert.Equal(HttpStatusCode.OK, procRes.StatusCode);
+
+        // Submitter queries submission -> Status Approved, ReviewNotes populated
+        var getMsg = new HttpRequestMessage(HttpMethod.Get, $"/companies/{companyId}/submissions/{subDto.Id}");
+        getMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memToken);
+        var getRes = await _client.SendAsync(getMsg);
+        var finalSub = await getRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.Equal(SubmissionStatus.Approved, finalSub!.Status);
+        Assert.Equal("Approved as delegated substitute", finalSub.ApprovalSteps[0].ReviewNotes);
+        Assert.Equal(mgr2UserId, finalSub.ApprovalSteps[0].ReviewedById);
+    }
+
+    [Fact]
+    public async Task Sprint2_FormUpdateMetadata_WhileSubmissionsInReview_PreservesInReviewWorkflows()
+    {
+        var (ownerToken, companyId, _) = await SetupCompanyAndOwnerAsync("MetaPreserveWf");
+        var (mgrToken, _, _) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Manager, "MgrMetaPreserve");
+        var (memToken, _, _) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Member, "MemMetaPreserve");
+
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "claimAmount", Name = "claimAmount", Label = "Số tiền yêu cầu", Type = FormFieldType.Number, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(ownerToken, companyId, fields, "Medical Claim");
+
+        // 1-step workflow
+        var wfMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/workflow")
+        {
+            Content = JsonContent.Create(new CreateOrUpdateWorkflowDto
+            {
+                Name = "Medical Claim Workflow",
+                IsActive = true,
+                Steps = new List<CreateOrUpdateApprovalStepDto>
+                {
+                    new() { OrderIndex = 1, Name = "HR Approval", StepType = ApprovalStepType.Role, ApproverRole = MemberRole.Manager }
+                }
+            })
+        };
+        wfMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        await _client.SendAsync(wfMsg);
+
+        // Submit form
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto { Data = new Dictionary<string, object?> { ["claimAmount"] = 1200 } })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memToken);
+        var submitRes = await _client.SendAsync(submitMsg);
+        var subDto = await submitRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.Equal(SubmissionStatus.InReview, subDto!.Status);
+
+        // While submission is InReview, admin updates form title & description
+        var updateMetaMsg = new HttpRequestMessage(HttpMethod.Put, $"/companies/{companyId}/forms/{form.Id}")
+        {
+            Content = JsonContent.Create(new UpdateFormDto
+            {
+                Title = "Medical Claim 2026 Policy Updated",
+                Description = "Updated medical claim policy description",
+                Fields = fields
+            })
+        };
+        updateMetaMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var updateMetaRes = await _client.SendAsync(updateMetaMsg);
+        Assert.Equal(HttpStatusCode.OK, updateMetaRes.StatusCode);
+
+        // Manager successfully approves the in-review submission
+        var approveMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/submissions/{subDto.Id}/steps/1/process")
+        {
+            Content = JsonContent.Create(new StepApprovalActionDto { Status = ApprovalStepStatus.Approved, ReviewNotes = "Medical claim approved under updated policy" })
+        };
+        approveMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", mgrToken);
+        var approveRes = await _client.SendAsync(approveMsg);
+        Assert.Equal(HttpStatusCode.OK, approveRes.StatusCode);
+
+        // Final verification
+        var getMsg = new HttpRequestMessage(HttpMethod.Get, $"/companies/{companyId}/submissions/{subDto.Id}");
+        getMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memToken);
+        var getRes = await _client.SendAsync(getMsg);
+        var finalSub = await getRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.Equal(SubmissionStatus.Approved, finalSub!.Status);
+        Assert.Equal(1, finalSub.FormVersion);
+        Assert.Single(finalSub.SchemaSnapshot);
+        Assert.Equal("claimAmount", finalSub.SchemaSnapshot[0].Name);
+    }
+
+    #endregion
 }
