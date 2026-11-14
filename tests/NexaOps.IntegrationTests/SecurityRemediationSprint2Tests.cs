@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -5,7 +6,9 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NexaOps.Application.AuditLogs.DTOs;
 using NexaOps.Application.Auth.DTOs;
+using NexaOps.Application.Common.Models;
 using NexaOps.Application.Companies.DTOs;
 using NexaOps.Application.CompanyMembers.DTOs;
 using NexaOps.Application.Departments.DTOs;
@@ -2109,6 +2112,316 @@ public class SecurityRemediationSprint2Tests : IClassFixture<CustomWebApplicatio
         Assert.Equal(1, finalSub.FormVersion);
         Assert.Single(finalSub.SchemaSnapshot);
         Assert.Equal("claimAmount", finalSub.SchemaSnapshot[0].Name);
+    }
+
+    #endregion
+
+    #region Checkpoint 6 & 7: Stress, Concurrency, Telemetry & Production Sign-off
+
+    [Fact]
+    public async Task Sprint2_DeepDepartmentHierarchy_CycleCheckStress_ExecutionWithinThreshold()
+    {
+        var (token, companyId) = await SetupCompanyAsync("StressDept");
+
+        // Construct a deep 15-level department chain: Dept0 -> Dept1 -> Dept2 -> ... -> Dept14
+        const int depth = 15;
+        var depts = new List<DepartmentResponse>();
+        Guid? parentId = null;
+        for (int i = 0; i < depth; i++)
+        {
+            var dept = await CreateDepartmentAsync(token, companyId, $"Tier {i} Department", parentId);
+            depts.Add(dept);
+            parentId = dept.Id;
+        }
+
+        // Stress check: Attempt to create a 15-level cycle by setting Dept0.ParentId = Dept14.Id
+        var sw = Stopwatch.StartNew();
+        var cycleReq = new UpdateDepartmentRequest { ParentId = depts[^1].Id };
+        var cycleMsg = new HttpRequestMessage(HttpMethod.Patch, $"/departments/{depts[0].Id}")
+        {
+            Content = JsonContent.Create(cycleReq)
+        };
+        cycleMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var cycleRes = await _client.SendAsync(cycleMsg);
+        sw.Stop();
+
+        Assert.Equal(HttpStatusCode.BadRequest, cycleRes.StatusCode);
+        var errBody = await cycleRes.Content.ReadAsStringAsync();
+        Assert.Contains("chu trình lặp", errBody);
+        Assert.True(sw.ElapsedMilliseconds < 1000, $"Cycle detection took {sw.ElapsedMilliseconds}ms, exceeding threshold");
+
+        // Verify GetDepartmentTree on deep chain executes safely without stack overflow
+        var treeMsg = new HttpRequestMessage(HttpMethod.Get, $"/companies/{companyId}/departments?tree=true");
+        treeMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var treeRes = await _client.SendAsync(treeMsg);
+        Assert.Equal(HttpStatusCode.OK, treeRes.StatusCode);
+        var tree = await treeRes.Content.ReadFromJsonAsync<List<DepartmentTreeNodeResponse>>(JsonOptions);
+        Assert.NotNull(tree);
+        Assert.Single(tree); // Exactly 1 root node at top
+        Assert.Equal(depts[0].Id, tree[0].Id);
+        Assert.Single(tree[0].Children); // Has 1 child
+    }
+
+    [Fact]
+    public async Task Sprint2_HighVolumeSubmissionPayload_ComplexNestedRepeatingSections_ValidatesAccurately()
+    {
+        var (token, companyId) = await SetupCompanyAsync("ComplexPayload");
+
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "projectName", Name = "projectName", Label = "Project Name", Type = FormFieldType.Text, Required = true },
+            new() { Id = "budget", Name = "budget", Label = "Total Budget", Type = FormFieldType.Number, Required = true },
+            new() {
+                Id = "contact",
+                Name = "contact",
+                Label = "Contact Information",
+                Type = FormFieldType.Text,
+                Required = true,
+                Fields = new List<FormFieldDto>
+                {
+                    new() { Id = "contactName", Name = "contactName", Label = "Contact Name", Type = FormFieldType.Text, Required = true },
+                    new() { Id = "contactEmail", Name = "contactEmail", Label = "Contact Email", Type = FormFieldType.Email, Required = true }
+                }
+            },
+            new() {
+                Id = "milestones",
+                Name = "milestones",
+                Label = "Project Milestones",
+                Type = FormFieldType.Text,
+                Required = true,
+                Fields = new List<FormFieldDto>
+                {
+                    new() { Id = "milestoneName", Name = "milestoneName", Label = "Milestone Name", Type = FormFieldType.Text, Required = true },
+                    new() { Id = "cost", Name = "cost", Label = "Cost", Type = FormFieldType.Number, Required = true }
+                }
+            }
+        };
+
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields, "Enterprise Project Intake");
+
+        // Construct payload with 10 repeating milestones
+        var milestones = new List<Dictionary<string, object?>>();
+        for (int i = 1; i <= 10; i++)
+        {
+            milestones.Add(new Dictionary<string, object?>
+            {
+                ["milestoneName"] = $"Phase {i} Deliverables",
+                ["cost"] = 5000 * i
+            });
+        }
+
+        var validPayload = new Dictionary<string, object?>
+        {
+            ["projectName"] = "Cloud Migration 2026",
+            ["budget"] = 275000,
+            ["contact"] = new Dictionary<string, object?>
+            {
+                ["contactName"] = "Nguyen Van A",
+                ["contactEmail"] = "nguyen.a@nexaops.com"
+            },
+            ["milestones"] = milestones
+        };
+
+        var sw = Stopwatch.StartNew();
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto { Data = validPayload })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var submitRes = await _client.SendAsync(submitMsg);
+        sw.Stop();
+
+        Assert.Equal(HttpStatusCode.Created, submitRes.StatusCode);
+        Assert.True(sw.ElapsedMilliseconds < 2000, $"Payload validation & submission took {sw.ElapsedMilliseconds}ms");
+
+        var subDto = await submitRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.NotNull(subDto);
+        Assert.Equal(1, subDto.FormVersion);
+        Assert.NotNull(subDto.SchemaSnapshot);
+        Assert.Equal(4, subDto.SchemaSnapshot.Count);
+
+        // Verify reading back from DB preserves full schema snapshot subfields and repeating data
+        var getMsg = new HttpRequestMessage(HttpMethod.Get, $"/companies/{companyId}/submissions/{subDto.Id}");
+        getMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var getRes = await _client.SendAsync(getMsg);
+        var fetchedSub = await getRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.NotNull(fetchedSub);
+        var contactField = fetchedSub.SchemaSnapshot.First(f => f.Name == "contact");
+        Assert.NotNull(contactField.Fields);
+        Assert.Equal(2, contactField.Fields.Count);
+        var milestonesField = fetchedSub.SchemaSnapshot.First(f => f.Name == "milestones");
+        Assert.NotNull(milestonesField.Fields);
+        Assert.Equal(2, milestonesField.Fields.Count);
+    }
+
+    [Fact]
+    public async Task Sprint2_RapidConcurrentSubmissions_PreservesVersionAndDataIntegrity()
+    {
+        var (token, companyId) = await SetupCompanyAsync("ConcurrentSub");
+
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "ticketTitle", Name = "ticketTitle", Label = "Ticket Title", Type = FormFieldType.Text, Required = true },
+            new() { Id = "priorityLevel", Name = "priorityLevel", Label = "Priority Level", Type = FormFieldType.Number, Required = true }
+        };
+
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields, "Incident Report");
+
+        // Fire 5 concurrent submissions simultaneously
+        var tasks = Enumerable.Range(1, 5).Select(async i =>
+        {
+            var msg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+            {
+                Content = JsonContent.Create(new SubmitFormDto
+                {
+                    Data = new Dictionary<string, object?>
+                    {
+                        ["ticketTitle"] = $"Incident #{i}",
+                        ["priorityLevel"] = i
+                    }
+                })
+            };
+            msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            var res = await _client.SendAsync(msg);
+            Assert.Equal(HttpStatusCode.Created, res.StatusCode);
+            return await res.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        }).ToList();
+
+        var results = await Task.WhenAll(tasks);
+
+        Assert.Equal(5, results.Length);
+        var uniqueIds = results.Select(r => r!.Id).Distinct().Count();
+        Assert.Equal(5, uniqueIds); // All submissions have unique IDs
+
+        foreach (var sub in results)
+        {
+            Assert.NotNull(sub);
+            Assert.Equal(1, sub.FormVersion);
+            Assert.Equal(2, sub.SchemaSnapshot.Count);
+            Assert.Equal(SubmissionStatus.Pending, sub.Status);
+        }
+    }
+
+    [Fact]
+    public async Task Sprint2_SecurityTelemetry_PayloadErrorDoesNotLeakInternalStackOrSensitiveData()
+    {
+        var (token, companyId) = await SetupCompanyAsync("TelemetrySec");
+
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "employeeAge", Name = "employeeAge", Label = "Employee Age", Type = FormFieldType.Number, Required = true }
+        };
+
+        var form = await CreatePublishedFormWithSchemaAsync(token, companyId, fields, "Employee Onboarding");
+
+        // 1. Send invalid type payload (string for number)
+        var invalidTypeMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["employeeAge"] = "not_a_valid_integer" }
+            })
+        };
+        invalidTypeMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var invalidTypeRes = await _client.SendAsync(invalidTypeMsg);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidTypeRes.StatusCode);
+        var invalidTypeBody = await invalidTypeRes.Content.ReadAsStringAsync();
+
+        // 2. Send undeclared property payload
+        var undeclaredMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto
+            {
+                Data = new Dictionary<string, object?> { ["employeeAge"] = 28, ["sqlInjectionPayload"] = "DROP TABLE users;" }
+            })
+        };
+        undeclaredMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var undeclaredRes = await _client.SendAsync(undeclaredMsg);
+        Assert.Equal(HttpStatusCode.BadRequest, undeclaredRes.StatusCode);
+        var undeclaredBody = await undeclaredRes.Content.ReadAsStringAsync();
+
+        // Assert no stack trace, server file paths, or sensitive runtime internals leak in either response
+        foreach (var body in new[] { invalidTypeBody, undeclaredBody })
+        {
+            Assert.DoesNotContain("System.Exception", body);
+            Assert.DoesNotContain("at NexaOps.", body);
+            Assert.DoesNotContain("at Microsoft.AspNetCore", body);
+            Assert.DoesNotContain("PostgresException", body);
+            Assert.DoesNotContain("Server=", body);
+            Assert.DoesNotContain("Password=", body);
+        }
+
+        // Verify both bodies convey safe business error context
+        Assert.True(invalidTypeBody.Contains("employeeAge") || invalidTypeBody.Contains("số"));
+        Assert.True(undeclaredBody.Contains("sqlInjectionPayload") || undeclaredBody.Contains("không được định nghĩa"));
+    }
+
+    [Fact]
+    public async Task Sprint2_AuditTrail_RecordsRemediatedDelegationAction()
+    {
+        var (ownerToken, companyId, ownerUserId) = await SetupCompanyAndOwnerAsync("AuditSec");
+        var (mgrToken, _, _) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Manager, "mgr");
+        var (empToken, _, _) = await CreateUserAndJoinCompanyAsync(ownerToken, companyId, MemberRole.Member, "emp");
+
+        // 1-step workflow assigned to Manager
+        var fields = new List<FormFieldDto>
+        {
+            new() { Id = "requestReason", Name = "requestReason", Label = "Reason", Type = FormFieldType.Text, Required = true }
+        };
+        var form = await CreatePublishedFormWithSchemaAsync(ownerToken, companyId, fields, "Purchase Request");
+
+        var wfMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/workflow")
+        {
+            Content = JsonContent.Create(new CreateOrUpdateWorkflowDto
+            {
+                Name = "Purchase Approval Workflow",
+                IsActive = true,
+                Steps = new List<CreateOrUpdateApprovalStepDto>
+                {
+                    new() { OrderIndex = 1, Name = "Manager Step", StepType = ApprovalStepType.Role, ApproverRole = MemberRole.Manager }
+                }
+            })
+        };
+        wfMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        await _client.SendAsync(wfMsg);
+
+        // Member submits form
+        var submitMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/forms/{form.Id}/submissions")
+        {
+            Content = JsonContent.Create(new SubmitFormDto { Data = new Dictionary<string, object?> { ["requestReason"] = "Office Hardware" } })
+        };
+        submitMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", empToken);
+        var submitRes = await _client.SendAsync(submitMsg);
+        var subDto = await submitRes.Content.ReadFromJsonAsync<FormSubmissionDto>(JsonOptions);
+        Assert.NotNull(subDto);
+
+        // Manager delegates step 1 to Owner (active company owner)
+        var delegateMsg = new HttpRequestMessage(HttpMethod.Post, $"/companies/{companyId}/submissions/{subDto.Id}/steps/1/delegate")
+        {
+            Content = JsonContent.Create(new DelegateStepDto
+            {
+                NewApproverUserId = ownerUserId,
+                Reason = "Delegating to company owner during executive audit"
+            })
+        };
+        delegateMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", mgrToken);
+        var delegateRes = await _client.SendAsync(delegateMsg);
+        Assert.Equal(HttpStatusCode.OK, delegateRes.StatusCode);
+
+        // Owner inspects company audit logs
+        var auditMsg = new HttpRequestMessage(HttpMethod.Get, $"/companies/{companyId}/audit-logs?action=DELEGATE_STEP");
+        auditMsg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var auditRes = await _client.SendAsync(auditMsg);
+        Assert.Equal(HttpStatusCode.OK, auditRes.StatusCode);
+
+        var auditLogs = await auditRes.Content.ReadFromJsonAsync<PagedResult<AuditLogDto>>(JsonOptions);
+        Assert.NotNull(auditLogs);
+        Assert.NotEmpty(auditLogs.Items);
+
+        var delegateLog = auditLogs.Items.FirstOrDefault(a => a.Action == "DELEGATE_STEP" && a.EntityId == subDto.Id.ToString());
+        Assert.NotNull(delegateLog);
+        Assert.Equal("FormSubmission", delegateLog.EntityType);
+        Assert.Equal(companyId, delegateLog.CompanyId);
     }
 
     #endregion
